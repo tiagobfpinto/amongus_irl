@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}Lobby · Among Us IRL{% endblock %}
+
+{% block nav %}
+<form action="{{ url_for('leave') }}" method="post">
+    <button type="submit" class="ghost small">Sair</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<section class="card" id="lobby-card">
+    <h1>Lobby</h1>
+    <p class="muted">Quando todos estiverem prontos, qualquer pessoa pode iniciar a ronda.</p>
+
+    <div class="status-board">
+        <div>
+            <span class="status-label">Jogadores</span>
+            <span id="player-count" class="status-value">0</span>
+        </div>
+        <div>
+            <span class="status-label">Prontos</span>
+            <span id="ready-count" class="status-value">0</span>
+        </div>
+        <div>
+            <span class="status-label">Estado</span>
+            <span id="game-status" class="status-value">Lobby</span>
+        </div>
+    </div>
+
+    <ul id="players" class="player-list"></ul>
+
+    <div id="lobby-message" class="flash info hidden"></div>
+
+    <div class="lobby-actions">
+        <button id="ready-btn" class="primary">Estou pronto</button>
+        <button id="start-btn" class="success" disabled>Começar jogo</button>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/lobby.js') }}"></script>
+{% endblock %}

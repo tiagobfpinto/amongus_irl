@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block title %}Entrar no Lobby · Among Us IRL{% endblock %}
+
+{% block content %}
+<section class="card">
+    <h1>Entrar no Lobby</h1>
+    <p class="muted">Escolhe um nome e junta-te ao lobby padrão.</p>
+    {% if error %}
+    <div class="flash error">{{ error }}</div>
+    {% endif %}
+    <form action="{{ url_for('join') }}" method="post" class="form">
+        <label for="name">Nome do jogador</label>
+        <input id="name" name="name" type="text" maxlength="30" required autofocus placeholder="Ex.: Capitão Verde">
+        <button type="submit" class="primary">Entrar</button>
+    </form>
+</section>
+{% endblock %}

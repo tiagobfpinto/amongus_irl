@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Em jogo · Among Us IRL{% endblock %}
+
+{% block nav %}
+<form action="{{ url_for('leave') }}" method="post">
+    <button type="submit" class="ghost small">Sair</button>
+</form>
+{% endblock %}
+
+{% block content %}
+<section class="card game-view">
+    <h1>Ronda ativa</h1>
+    <p class="muted">Partilha apenas a tua própria tela. Cada jogador vê o seu papel e tarefas.</p>
+
+    <div id="role-card" class="role-card">
+        <h2>Tu és <span id="role-name">...</span></h2>
+        <p id="role-hint" class="muted"></p>
+    </div>
+
+    <section class="tasks">
+        <h3>Tarefas</h3>
+        <div class="task-columns">
+            <div class="task-group">
+                <h4>Common</h4>
+                <ul id="tasks-common"></ul>
+            </div>
+            <div class="task-group">
+                <h4>Long</h4>
+                <ul id="tasks-long"></ul>
+            </div>
+            <div class="task-group">
+                <h4>Fast</h4>
+                <ul id="tasks-fast"></ul>
+            </div>
+        </div>
+    </section>
+
+    <section id="impostor-tools" class="impostor-tools hidden">
+        <h3>Ferramentas do impostor</h3>
+        <p class="muted">Podes simular tarefas, mas só matar quando o cooldown terminar.</p>
+        <button id="kill-btn" class="danger">Matei</button>
+        <div id="kill-timer" class="kill-timer muted">Cooldown: 0s</div>
+    </section>
+
+    <div class="game-actions">
+        <button id="refresh-btn" class="ghost">Atualizar dados</button>
+        <button id="reset-btn" class="ghost">Voltar ao lobby</button>
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/game.js') }}"></script>
+{% endblock %}

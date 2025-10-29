@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{% block title %}Among Us IRL{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <header class="site-header">
+        <div class="header-content">
+            <span class="brand">Among Us IRL</span>
+            <nav>
+                {% block nav %}{% endblock %}
+            </nav>
+        </div>
+    </header>
+    <main class="page">
+        {% block content %}{% endblock %}
+    </main>
+    {% block scripts %}{% endblock %}
+</body>
+</html>
