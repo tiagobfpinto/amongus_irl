@@ -1,4 +1,4 @@
-import random
+﻿import random
 import string
 import threading
 import time
@@ -17,29 +17,31 @@ from flask import (
     url_for,
 )
 
+def random_drawing():
+    drawings = [
+        "cuzgabs todo teso","kika a mamar mariana", "miguel a dar o cu",
+        "lara a mamar irmao de parra","bapt a dancar","keil a fumar um kaya"
+    ]
+    return random.choice(drawings)
 
 def _default_task_pool() -> Dict[str, List[str]]:
     """Provide starter tasks so the app works out of the box."""
     return {
         "common": [
-            "Scan ID card",
-            "Fix wiring in cafeteria",
-            "Swipe admin badge",
+            "Assinar a folha de presencças (mesa inicial)"
         ],
         "long": [
-            "Calibrate distributor",
-            "Fuel engines",
-            "Inspect sample",
-            "Align engine output",
+            f"Desenha {random_drawing()} no quarto das crianças",
+            "Fazer castelo de cartas (quarto principal)",
+            "Encher saco do lixo, e levar lá para fora para o sitio certo",
+            "Acertar nas 3 latas com uma bala de nerf (jardim)",
         ],
         "fast": [
-            "Prime shields",
-            "Chart course",
-            "Empty garbage",
-            "Stabilize steering",
+            "Beber conteudo do copo (cozinha)",
+            "Recolher uma flor do jardim e colocar dentro do lavatório (cozinha)",
             "Download data in weapons",
-            "Submit asteroid report",
-            "Divert power to navigation",
+            "Ligar TV do quarto principal",
+            "Coloca toalha dentro da banheira (casa de banho)",
         ],
     }
 
@@ -77,6 +79,10 @@ class Player:
     kill_cooldown_end: float = 0.0
     joined_at: float = field(default_factory=time.time)
     avatar: str = ""
+    death_time: Optional[float] = None
+    killed_by: Optional[str] = None
+    killed_by_name: Optional[str] = None
+    death_reported: bool = False
 
     def lobby_payload(self, current_id: str, leader_id: Optional[str]) -> Dict[str, object]:
         return {
@@ -88,6 +94,24 @@ class Player:
             "leader": self.player_id == leader_id,
             "avatar": self.avatar,
         }
+
+    def death_payload(self, viewer_id: Optional[str] = None) -> Optional[Dict[str, object]]:
+        if self.alive or not self.death_time:
+            return None
+        payload = {
+            "id": self.player_id,
+            "name": self.name,
+            "killedAt": int(self.death_time),
+            "killedBy": self.killed_by,
+            "killedByName": self.killed_by_name,
+            "reported": self.death_reported,
+            "avatar": self.avatar,
+        }
+        if viewer_id != self.player_id:
+            payload.pop("killedAt", None)
+            payload.pop("killedBy", None)
+            payload.pop("killedByName", None)
+        return payload
 
     def kill_cooldown_remaining(self) -> int:
         remaining = max(0.0, self.kill_cooldown_end - time.time())
@@ -102,6 +126,7 @@ class Player:
 
 class GameState:
     SKIP_VOTE = "skip"
+    MEETING_VOTE_DELAY = 10
     CONFIG_LIMITS = {
         "required_players": {"min": 2, "max": 15},
         "kill_cooldown": {"min": 10, "max": 600},
@@ -337,6 +362,10 @@ class GameState:
                     player.kill_cooldown_end = time.time()
                 else:
                     player.kill_cooldown_end = 0.0
+                player.death_time = None
+                player.killed_by = None
+                player.killed_by_name = None
+                player.death_reported = False
 
             return {"ok": True}
 
@@ -354,8 +383,12 @@ class GameState:
                 player.tasks = {}
                 player.alive = True
                 player.kill_cooldown_end = 0.0
+                player.death_time = None
+                player.killed_by = None
+                player.killed_by_name = None
+                player.death_reported = False
 
-    def impostor_kill(self, player_id: str) -> Dict[str, object]:
+    def impostor_kill(self, player_id: str, target_id: str) -> Dict[str, object]:
         with self._lock:
             player = self.players.get(player_id)
             if not player:
@@ -364,6 +397,16 @@ class GameState:
                 return {"ok": False, "error": "O jogo ainda nao comecou."}
             if player.role != "impostor":
                 return {"ok": False, "error": "Apenas o impostor pode usar este botao."}
+            if not target_id:
+                return {"ok": False, "error": "Seleciona a vitima."}
+
+            target_player = self.players.get(target_id)
+            if not target_player or not target_player.alive:
+                return {"ok": False, "error": "Vitima invalida."}
+            if target_player.player_id == player.player_id:
+                return {"ok": False, "error": "Nao podes matar-te a ti proprio."}
+            if target_player.role == "impostor":
+                return {"ok": False, "error": "Nao podes matar outro impostor."}
 
             now = time.time()
             if now < player.kill_cooldown_end:
@@ -375,7 +418,27 @@ class GameState:
                 }
 
             player.kill_cooldown_end = now + self.config["kill_cooldown"]
-            return {"ok": True, "cooldown": self.config["kill_cooldown"]}
+            self._mark_player_dead_locked(target_player, player)
+
+            impostor_survivor = self._impostor_last_crewmate_locked()
+            if impostor_survivor and self.status == "in_game":
+                self.status = "ended"
+                self.end_info = {
+                    "winner": "impostor",
+                    "reason": "last_crewmate",
+                    "impostor": {
+                        "id": impostor_survivor.player_id,
+                        "name": impostor_survivor.name,
+                    },
+                    "message": f"O impostor {impostor_survivor.name} Venceu!",
+                }
+
+            return {
+                "ok": True,
+                "cooldown": self.config["kill_cooldown"],
+                "victim": target_player.death_payload(),
+                "gameOver": self.end_info if self.status == "ended" else None,
+            }
 
     def _task_totals_unlocked(self) -> Tuple[int, int]:
         total = 0
@@ -424,6 +487,22 @@ class GameState:
     def _alive_players_unlocked(self) -> List[Player]:
         return [player for player in self.players.values() if player.alive]
 
+    def _dead_players_unlocked(self) -> List[Player]:
+        return [player for player in self.players.values() if not player.alive and player.death_time]
+
+    def _mark_player_dead_locked(self, victim: Player, killer: Optional[Player]) -> None:
+        if not victim.alive:
+            return
+        victim.alive = False
+        victim.death_time = time.time()
+        if killer:
+            victim.killed_by = killer.player_id
+            victim.killed_by_name = killer.name
+        else:
+            victim.killed_by = None
+            victim.killed_by_name = None
+        victim.death_reported = False
+
     def _impostor_last_crewmate_locked(self) -> Optional[Player]:
         alive_players = self._alive_players_unlocked()
         impostors = [player for player in alive_players if player.role == "impostor"]
@@ -432,7 +511,7 @@ class GameState:
             return impostors[0]
         return None
 
-    def start_meeting(self, caller_id: str) -> Dict[str, object]:
+    def start_meeting(self, caller_id: str, body_id: Optional[str]) -> Dict[str, object]:
         with self._lock:
             caller = self.players.get(caller_id)
             if not caller:
@@ -444,6 +523,13 @@ class GameState:
             if self.meeting:
                 return {"ok": False, "error": "Ja existe uma reuniao a decorrer."}
 
+            if not body_id:
+                return {"ok": False, "error": "Indica o corpo reportado."}
+            reported_body = self.players.get(body_id)
+            if not reported_body or reported_body.alive or not reported_body.death_time:
+                return {"ok": False, "error": "Esse corpo nao foi encontrado."}
+            reported_body.death_reported = True
+
             now = time.time()
             meeting_id = str(uuid.uuid4())
             self.status = "meeting"
@@ -453,6 +539,8 @@ class GameState:
                 "started_at": now,
                 "ends_at": now + self.config["meeting_duration"],
                 "votes": {},
+                "reported_body": reported_body.player_id,
+                "voting_starts_at": now + self.MEETING_VOTE_DELAY,
             }
             return {"ok": True, "meetingId": meeting_id}
 
@@ -517,6 +605,9 @@ class GameState:
                 "revealed": self.revealed_progress,
             },
         }
+        summary["deceased"] = [
+            payload for payload in (p.death_payload() for p in self.players.values()) if payload
+        ]
 
         if ejected_player:
             summary["ejected"] = {
@@ -570,6 +661,16 @@ class GameState:
             if self.status != "meeting" or not self.meeting:
                 return {"ok": False, "error": "A reuniao ja terminou."}
 
+            vote_start = self.meeting.get("voting_starts_at", self.meeting.get("started_at", 0))
+            now = time.time()
+            if now < vote_start:
+                remaining = int(vote_start - now)
+                return {
+                    "ok": False,
+                    "error": "Ainda nao podes votar. Aguarda alguns segundos.",
+                    "delay": remaining,
+                }
+
             if target_id and target_id != self.SKIP_VOTE:
                 target_player = self.players.get(target_id)
                 if not target_player or not target_player.alive:
@@ -589,19 +690,73 @@ class GameState:
         if not self.meeting:
             return None
         remaining = max(0, int(self.meeting["ends_at"] - time.time()))
-        alive_players = [
-            {"id": p.player_id, "name": p.name, "avatar": p.avatar}
-            for p in self.players.values()
-            if p.alive
-        ]
+        voting_starts_in = max(0, int(self.meeting["voting_starts_at"] - time.time()))
+        votes = self.meeting["votes"]
+        alive_players = []
+        for p in self.players.values():
+            if not p.alive:
+                continue
+            alive_players.append(
+                {
+                    "id": p.player_id,
+                    "name": p.name,
+                    "avatar": p.avatar,
+                    "hasVoted": p.player_id in votes,
+                }
+            )
+
+        deceased_players = []
+        for player in self._dead_players_unlocked():
+            payload = player.death_payload(current_player_id)
+            if payload:
+                deceased_players.append(payload)
+
+        reported_body_id = self.meeting.get("reported_body")
+        reported_body = self.players.get(reported_body_id) if reported_body_id else None
+        reported_payload = None
+        if reported_body:
+            reported_payload = {
+                "id": reported_body.player_id,
+                "name": reported_body.name,
+                "avatar": reported_body.avatar,
+            }
+            if reported_body.player_id == current_player_id and reported_body.killed_by_name:
+                reported_payload["killedByName"] = reported_body.killed_by_name
+
         votes = self.meeting["votes"]
         return {
             "id": self.meeting["id"],
             "caller": self.meeting["caller"],
             "endsIn": remaining,
             "alivePlayers": alive_players,
+            "deceased": deceased_players,
+            "reportedBody": reported_payload,
+            "voted": list(votes.keys()),
+            "votingStartsIn": voting_starts_in,
             "myVote": votes.get(current_player_id),
         }
+
+    def _meeting_summary_for_player_unlocked(
+        self, current_player_id: str
+    ) -> Optional[Dict[str, object]]:
+        summary = self.last_meeting_summary
+        if not summary:
+            return None
+        filtered = summary.copy()
+        raw_deceased = summary.get("deceased", [])
+        deceased_entries: List[Dict[str, object]] = []
+        for entry in raw_deceased:
+            if not entry:
+                continue
+            entry_copy = dict(entry)
+            if entry_copy.get("id") != current_player_id:
+                entry_copy.pop("killedAt", None)
+                entry_copy.pop("killedBy", None)
+                entry_copy.pop("killedByName", None)
+            deceased_entries.append(entry_copy)
+        if "deceased" in filtered:
+            filtered["deceased"] = deceased_entries
+        return filtered
 
     def player_view(self, player_id: str) -> Dict[str, object]:
         with self._lock:
@@ -616,8 +771,34 @@ class GameState:
             current_progress = completed / total if total else 0.0
 
             meeting_payload = self._meeting_payload_unlocked(player_id)
-            summary = self.last_meeting_summary
+            summary = self._meeting_summary_for_player_unlocked(player_id)
             end_info = self.end_info if self.status == "ended" else None
+
+            dead_payloads = []
+            for target in self.players.values():
+                payload = target.death_payload(player_id)
+                if payload:
+                    dead_payloads.append(payload)
+            kill_targets = []
+            if player.role == "impostor":
+                for other in self.players.values():
+                    if other.player_id == player_id or not other.alive:
+                        continue
+                    kill_targets.append(
+                        {
+                            "id": other.player_id,
+                            "name": other.name,
+                            "avatar": other.avatar,
+                        }
+                    )
+
+            death_note = None
+            if not player.alive and player.death_time and player.killed_by_name:
+                killed_at = time.strftime("%H:%M", time.localtime(player.death_time))
+                death_note = f"Foste morto às {killed_at} por {player.killed_by_name}."
+            elif not player.alive and player.death_time:
+                killed_at = time.strftime("%H:%M", time.localtime(player.death_time))
+                death_note = f"Foste morto às {killed_at}."
 
             payload = {
                 "ok": True,
@@ -632,6 +813,8 @@ class GameState:
                 "tasks": player.tasks_payload(),
                 "killCooldown": self.config["kill_cooldown"],
                 "killRemaining": player.kill_cooldown_remaining(),
+                "deadPlayers": dead_payloads,
+                "deathNote": death_note,
                 "progress": {
                     "total": total,
                     "completed": completed,
@@ -639,6 +822,8 @@ class GameState:
                     "revealed": self.revealed_progress,
                 },
             }
+            if kill_targets:
+                payload["killTargets"] = kill_targets
 
             if meeting_payload:
                 payload["meeting"] = meeting_payload
@@ -903,7 +1088,9 @@ def api_report():
     lobby_obj, player = _current_context()
     if not lobby_obj or not player:
         return jsonify({"ok": False, "error": "Sessao expirada. Volta ao lobby."}), 404
-    result = lobby_obj.start_meeting(player.player_id)
+    data = request.get_json(silent=True) or {}
+    body_id = data.get("bodyId") or data.get("body_id")
+    result = lobby_obj.start_meeting(player.player_id, body_id)
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 
@@ -950,7 +1137,9 @@ def api_impostor_kill():
     lobby_obj, player = _current_context()
     if not lobby_obj or not player:
         return jsonify({"ok": False, "error": "Sessao expirada. Volta ao lobby."}), 404
-    result = lobby_obj.impostor_kill(player.player_id)
+    data = request.get_json(silent=True) or {}
+    target_id = data.get("targetId") or data.get("target_id")
+    result = lobby_obj.impostor_kill(player.player_id, target_id or "")
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 

@@ -29,6 +29,7 @@
         <h2>Tu es <span id="role-name">...</span></h2>
         <p id="role-hint" class="muted"></p>
         <p id="leader-badge" class="muted hidden">Tu es o lider. Usa o botao Terminar jogo se precisares.</p>
+        <p id="death-note" class="death-note hidden"></p>
     </div>
 
     <section class="task-progress">
@@ -74,7 +75,11 @@
 <div id="meeting-overlay" class="game-overlay hidden">
     <div class="overlay-card">
         <h2>Reuniao</h2>
-        <p class="muted">Tempo restante: <span id="meeting-timer">150s</span></p>
+        <div class="meeting-header">
+            <p class="muted">Tempo restante: <span id="meeting-timer">150s</span></p>
+            <p id="meeting-lock" class="muted"></p>
+        </div>
+        <div id="meeting-deceased" class="meeting-deceased hidden"></div>
         <div id="meeting-options" class="vote-grid"></div>
         <p id="meeting-feedback" class="meeting-feedback muted"></p>
     </div>
@@ -94,6 +99,27 @@
         <h2 id="game-over-title">Fim de jogo</h2>
         <p id="game-over-text" class="summary-text"></p>
         <button id="game-over-reset" class="primary">Voltar ao lobby</button>
+    </div>
+</div>
+
+<div id="kill-overlay" class="game-overlay hidden">
+    <div class="overlay-card narrow">
+        <h2>Escolhe a vitima</h2>
+        <div id="kill-options" class="vote-grid"></div>
+        <div class="overlay-actions">
+            <button id="kill-cancel" class="ghost">Cancelar</button>
+        </div>
+    </div>
+</div>
+
+<div id="report-overlay" class="game-overlay hidden">
+    <div class="overlay-card narrow">
+        <h2>Reportar corpo</h2>
+        <div id="report-options" class="vote-grid"></div>
+        <p id="report-feedback" class="muted small hidden"></p>
+        <div class="overlay-actions">
+            <button id="report-cancel" class="ghost">Cancelar</button>
+        </div>
     </div>
 </div>
 {% endblock %}

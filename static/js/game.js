@@ -27,6 +27,16 @@ const gameOverTextEl = document.getElementById("game-over-text");
 const gameOverResetBtn = document.getElementById("game-over-reset");
 const impostorRevealEl = document.getElementById("impostor-reveal");
 const impostorRevealContent = impostorRevealEl ? impostorRevealEl.querySelector(".reveal-content") : null;
+const deathNoteEl = document.getElementById("death-note");
+const meetingLockEl = document.getElementById("meeting-lock");
+const meetingDeceasedEl = document.getElementById("meeting-deceased");
+const killOverlay = document.getElementById("kill-overlay");
+const killOptionsEl = document.getElementById("kill-options");
+const killCancelBtn = document.getElementById("kill-cancel");
+const reportOverlay = document.getElementById("report-overlay");
+const reportOptionsEl = document.getElementById("report-options");
+const reportFeedbackEl = document.getElementById("report-feedback");
+const reportCancelBtn = document.getElementById("report-cancel");
 
 const POLL_INTERVAL = 4000;
 const SKIP_VOTE = "skip";
@@ -46,6 +56,13 @@ let lastRevealedRatio = 0;
 let isFetching = false;
 let fetchPending = false;
 let isLeader = false;
+let killTargets = [];
+let deadPlayersList = [];
+let reportableBodies = [];
+let votingLocked = false;
+let votingRemaining = 0;
+let meetingVoteCountdownTimer = null;
+let currentMeetingData = null;
 
 function translateRole(role) {
     if (role === "impostor") {
@@ -65,6 +82,16 @@ function roleHint(role) {
         return "Completa as tuas tarefas e desconfia dos impostores.";
     }
     return "A aguardar inicio do jogo.";
+}
+
+function formatTimeHM(seconds) {
+    if (!seconds) {
+        return "--:--";
+    }
+    const date = new Date(seconds * 1000);
+    const hours = String(date.getHours()).padStart(2, "0");
+    const minutes = String(date.getMinutes()).padStart(2, "0");
+    return hours + ":" + minutes;
 }
 
 function createTaskElement(task) {
@@ -172,11 +199,16 @@ function updateKillUI() {
     }
     impostorToolsEl.classList.remove("hidden");
     const remaining = Math.max(0, killRemaining);
+    const availableTargets = Array.isArray(killTargets) ? killTargets.length : 0;
     if (killBtn) {
-        killBtn.disabled = remaining > 0;
+        killBtn.disabled = remaining > 0 || availableTargets === 0;
     }
     if (killTimerEl) {
-        killTimerEl.textContent = "Cooldown: " + remaining + "s";
+        if (availableTargets === 0) {
+            killTimerEl.textContent = "Sem alvos disponiveis.";
+        } else {
+            killTimerEl.textContent = "Cooldown: " + remaining + "s";
+        }
     }
 }
 
@@ -215,13 +247,131 @@ function playImpostorReveal() {
     }, 2800);
 }
 
+function stopVotingDelay() {
+    votingLocked = false;
+    votingRemaining = 0;
+    if (meetingVoteCountdownTimer) {
+        clearInterval(meetingVoteCountdownTimer);
+        meetingVoteCountdownTimer = null;
+    }
+    if (meetingOverlay) {
+        meetingOverlay.classList.remove("intro-phase");
+    }
+}
+
+function startVotingDelay(seconds) {
+    stopVotingDelay();
+    if (!seconds || seconds <= 0) {
+        return;
+    }
+    votingLocked = true;
+    votingRemaining = seconds;
+    if (meetingOverlay) {
+        meetingOverlay.classList.add("intro-phase");
+    }
+    if (meetingLockEl) {
+        meetingLockEl.textContent = "Votacoes iniciam em " + votingRemaining + "s";
+    }
+    meetingVoteCountdownTimer = setInterval(function () {
+        if (votingRemaining > 0) {
+            votingRemaining -= 1;
+            if (meetingLockEl) {
+                meetingLockEl.textContent = "Votacoes iniciam em " + votingRemaining + "s";
+            }
+        } else {
+            stopVotingDelay();
+            if (currentMeetingData) {
+                renderMeetingOptions(currentMeetingData);
+                renderMeetingStatus(currentMeetingData);
+            }
+        }
+    }, 1000);
+}
+
+function renderMeetingDeceased(meeting) {
+    if (!meetingDeceasedEl) {
+        return;
+    }
+    const deceased = meeting && Array.isArray(meeting.deceased) ? meeting.deceased : [];
+    meetingDeceasedEl.innerHTML = "";
+    if (deceased.length === 0) {
+        meetingDeceasedEl.classList.add("hidden");
+        return;
+    }
+    meetingDeceasedEl.classList.remove("hidden");
+    deceased.forEach(function (entry) {
+        const card = document.createElement("div");
+        card.classList.add("deceased-card");
+        if (entry.reported || (meeting.reportedBody && meeting.reportedBody.id === entry.id)) {
+            card.classList.add("reported");
+        }
+        if (entry.avatar) {
+            const avatar = document.createElement("img");
+            avatar.src = entry.avatar;
+            avatar.alt = entry.name || "Jogador";
+            avatar.classList.add("avatar");
+            card.appendChild(avatar);
+        }
+        const infoWrap = document.createElement("div");
+        infoWrap.classList.add("info");
+        const nameSpan = document.createElement("span");
+        nameSpan.classList.add("name");
+        nameSpan.textContent = entry.name || "Jogador";
+        infoWrap.appendChild(nameSpan);
+        if (entry.killedAt) {
+            const timeSpan = document.createElement("span");
+            timeSpan.textContent = "Morto às " + formatTimeHM(entry.killedAt);
+            infoWrap.appendChild(timeSpan);
+        }
+        if (entry.killedByName) {
+            const killerSpan = document.createElement("span");
+            killerSpan.textContent = "Por " + entry.killedByName;
+            infoWrap.appendChild(killerSpan);
+        }
+        card.appendChild(infoWrap);
+        meetingDeceasedEl.appendChild(card);
+    });
+}
+
+function renderMeetingStatus(meeting) {
+    if (meetingLockEl) {
+        if (votingLocked && votingRemaining > 0) {
+            meetingLockEl.textContent = "Votacoes iniciam em " + votingRemaining + "s";
+        } else {
+            meetingLockEl.textContent = "";
+        }
+    }
+    if (!meetingFeedbackEl) {
+        return;
+    }
+    if (!meeting || !meeting.alivePlayers) {
+        meetingFeedbackEl.textContent = "";
+        return;
+    }
+    if (votingLocked && votingRemaining > 0) {
+        meetingFeedbackEl.textContent = "Aguardem antes de votar.";
+        return;
+    }
+    const pending = meeting.alivePlayers.filter(function (player) {
+        return !player.hasVoted;
+    });
+    if (pending.length === 0) {
+        meetingFeedbackEl.textContent = "Todos ja votaram.";
+    } else {
+        const names = pending.map(function (player) {
+            return player.name;
+        });
+        meetingFeedbackEl.textContent = "Faltam votar: " + names.join(", ");
+    }
+}
+
 function renderMeetingOptions(meeting) {
     if (!meetingOptionsEl) {
         return;
     }
     meetingOptionsEl.innerHTML = "";
     const myVote = meeting ? meeting.myVote : null;
-    const disabled = !isAlive;
+    const disabled = !isAlive || votingLocked;
     const alivePlayers = meeting && meeting.alivePlayers ? meeting.alivePlayers : [];
 
     for (let i = 0; i < alivePlayers.length; i += 1) {
@@ -232,6 +382,9 @@ function renderMeetingOptions(meeting) {
         btn.title = player.name || "";
         if (player.id === myVote) {
             btn.classList.add("selected");
+        }
+        if (player.hasVoted) {
+            btn.classList.add("has-voted");
         }
         btn.disabled = disabled;
         btn.addEventListener("click", function () {
@@ -295,16 +448,236 @@ function stopMeetingCountdown() {
     }
 }
 
+function closeKillModal() {
+    if (killOverlay) {
+        killOverlay.classList.add("hidden");
+    }
+}
+
+function renderKillOptions() {
+    if (!killOptionsEl) {
+        return;
+    }
+    killOptionsEl.innerHTML = "";
+    if (!Array.isArray(killTargets) || killTargets.length === 0) {
+        const p = document.createElement("p");
+        p.classList.add("muted");
+        p.textContent = "Sem alvos disponiveis.";
+        killOptionsEl.appendChild(p);
+        return;
+    }
+    killTargets.forEach(function (target) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        const option = document.createElement("div");
+        option.classList.add("vote-option");
+        if (target.avatar) {
+            const avatar = document.createElement("img");
+            avatar.src = target.avatar;
+            avatar.alt = target.name || "Jogador";
+            avatar.classList.add("vote-avatar");
+            option.appendChild(avatar);
+        }
+        const label = document.createElement("span");
+        label.classList.add("vote-name");
+        label.textContent = target.name || "Jogador";
+        option.appendChild(label);
+        btn.appendChild(option);
+        btn.addEventListener("click", function () {
+            performKill(target.id);
+        });
+        killOptionsEl.appendChild(btn);
+    });
+}
+
+function openKillModal() {
+    if (!killOverlay) {
+        return;
+    }
+    if (!Array.isArray(killTargets) || killTargets.length === 0) {
+        alert("Sem alvos vivos para eliminar.");
+        return;
+    }
+    renderKillOptions();
+    killOverlay.classList.remove("hidden");
+}
+
+function performKill(targetId) {
+    if (!targetId) {
+        return;
+    }
+    const buttons = killOptionsEl ? killOptionsEl.querySelectorAll("button") : [];
+    buttons.forEach(function (btn) {
+        btn.disabled = true;
+    });
+    if (killBtn) {
+        killBtn.disabled = true;
+    }
+    fetch("/api/impostor/kill", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetId: targetId })
+    })
+        .then(parseJsonSafe)
+        .then(function (data) {
+            if (!data || !data.ok) {
+                const msg = data && data.error ? data.error : "Nao podes matar neste momento.";
+                throw new Error(msg);
+            }
+            killRemaining = typeof data.cooldown === "number" ? data.cooldown : killRemaining;
+            closeKillModal();
+            updateKillUI();
+            if (killRemaining > 0) {
+                startKillCountdown();
+            }
+            if (data.gameOver) {
+                showGameOver(data.gameOver);
+            } else {
+                fetchPlayer();
+            }
+        })
+        .catch(function (error) {
+            console.error(error);
+            alert(error.message);
+            if (killOverlay && !killOverlay.classList.contains("hidden")) {
+                renderKillOptions();
+            }
+        })
+        .finally(function () {
+            buttons.forEach(function (btn) {
+                btn.disabled = false;
+            });
+            updateKillUI();
+        });
+}
+
+function closeReportModal() {
+    if (reportOverlay) {
+        reportOverlay.classList.add("hidden");
+    }
+    if (reportFeedbackEl) {
+        reportFeedbackEl.classList.add("hidden");
+        reportFeedbackEl.textContent = "";
+    }
+}
+
+function renderReportOptions() {
+    if (!reportOptionsEl) {
+        return;
+    }
+    reportOptionsEl.innerHTML = "";
+    if (!Array.isArray(reportableBodies) || reportableBodies.length === 0) {
+        const p = document.createElement("p");
+        p.classList.add("muted");
+        p.textContent = "Nao existem corpos por reportar.";
+        reportOptionsEl.appendChild(p);
+        return;
+    }
+    reportableBodies.forEach(function (body) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        const option = document.createElement("div");
+        option.classList.add("vote-option");
+        if (body.avatar) {
+            const avatar = document.createElement("img");
+            avatar.src = body.avatar;
+            avatar.alt = body.name || "Jogador";
+            avatar.classList.add("vote-avatar");
+            option.appendChild(avatar);
+        }
+        const label = document.createElement("span");
+        label.classList.add("vote-name");
+        label.textContent = body.name || "Jogador";
+        option.appendChild(label);
+        if (body.killedAt) {
+            const info = document.createElement("span");
+            info.classList.add("muted");
+            info.textContent = "Encontrado às " + formatTimeHM(body.killedAt);
+            option.appendChild(info);
+        }
+        btn.appendChild(option);
+        btn.addEventListener("click", function () {
+            submitReport(body.id);
+        });
+        reportOptionsEl.appendChild(btn);
+    });
+}
+
+function openReportModal() {
+    if (!reportOverlay) {
+        return;
+    }
+    if (!Array.isArray(reportableBodies) || reportableBodies.length === 0) {
+        alert("Nao ha corpos por reportar.");
+        return;
+    }
+    renderReportOptions();
+    reportOverlay.classList.remove("hidden");
+}
+
+function submitReport(bodyId) {
+    if (!bodyId) {
+        return;
+    }
+    const buttons = reportOptionsEl ? reportOptionsEl.querySelectorAll("button") : [];
+    buttons.forEach(function (btn) {
+        btn.disabled = true;
+    });
+    if (reportFeedbackEl) {
+        reportFeedbackEl.classList.add("hidden");
+        reportFeedbackEl.textContent = "";
+    }
+    fetch("/api/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bodyId: bodyId })
+    })
+        .then(parseJsonSafe)
+        .then(function (data) {
+            if (!data || !data.ok) {
+                const msg = data && data.error ? data.error : "Nao foi possivel chamar reuniao.";
+                throw new Error(msg);
+            }
+            closeReportModal();
+            fetchPlayer();
+        })
+        .catch(function (error) {
+            console.error(error);
+            if (reportFeedbackEl) {
+                reportFeedbackEl.textContent = error.message;
+                reportFeedbackEl.classList.remove("hidden");
+            } else {
+                alert(error.message);
+            }
+        })
+        .finally(function () {
+            buttons.forEach(function (btn) {
+                btn.disabled = false;
+            });
+        });
+}
+
 function showMeeting(meeting) {
     if (!meetingOverlay) {
         return;
     }
-    if (meeting && meeting.id !== lastMeetingId && meetingFeedbackEl) {
-        meetingFeedbackEl.textContent = "";
+    if (meeting && meeting.id !== lastMeetingId) {
         lastMeetingId = meeting.id;
+        if (meetingFeedbackEl) {
+            meetingFeedbackEl.textContent = "";
+        }
+        stopVotingDelay();
     }
+    currentMeetingData = meeting || null;
     meetingOverlay.classList.remove("hidden");
     renderMeetingOptions(meeting);
+    renderMeetingDeceased(meeting);
+    if (meeting && typeof meeting.votingStartsIn === "number") {
+        startVotingDelay(meeting.votingStartsIn);
+    } else {
+        stopVotingDelay();
+    }
+    renderMeetingStatus(meeting);
     startMeetingCountdown(meeting ? meeting.endsIn || 0 : 0);
 }
 
@@ -314,7 +687,9 @@ function hideMeeting() {
     }
     meetingOverlay.classList.add("hidden");
     stopMeetingCountdown();
+    stopVotingDelay();
     lastMeetingId = null;
+    currentMeetingData = null;
 }
 
 function describeSummary(summary) {
@@ -453,6 +828,14 @@ function sendVote(target) {
         .then(function (response) {
             return parseJsonSafe(response).then(function (data) {
                 if (!response.ok || !data.ok) {
+                    if (data && typeof data.delay === "number") {
+                        startVotingDelay(data.delay);
+                        if (meetingFeedbackEl) {
+                            meetingFeedbackEl.textContent =
+                                (data.error || "Ainda nao podes votar.") + " (" + data.delay + "s)";
+                        }
+                        return;
+                    }
                     const msg = data && data.error ? data.error : "Nao foi possivel votar.";
                     throw new Error(msg);
                 }
@@ -474,46 +857,14 @@ function reportBody() {
     if (!reportBtn) {
         return;
     }
-    reportBtn.disabled = true;
-    fetch("/api/report", { method: "POST" })
-        .then(parseJsonSafe)
-        .then(function (data) {
-            if (!data.ok) {
-                throw new Error(data.error || "Nao foi possivel chamar reuniao.");
-            }
-            fetchPlayer();
-        })
-        .catch(function (error) {
-            console.error(error);
-            alert(error.message);
-        })
-        .finally(function () {
-            reportBtn.disabled = false;
-        });
+    openReportModal();
 }
 
 function triggerKill() {
     if (!isImpostor || !isAlive || currentStatus !== "in_game" || !killBtn) {
         return;
     }
-    killBtn.disabled = true;
-    fetch("/api/impostor/kill", { method: "POST" })
-        .then(parseJsonSafe)
-        .then(function (data) {
-            if (!data.ok) {
-                throw new Error(data.error || "Nao podes matar neste momento.");
-            }
-            killRemaining = typeof data.cooldown === "number" ? data.cooldown : 0;
-            updateKillUI();
-            startKillCountdown();
-        })
-        .catch(function (error) {
-            console.error(error);
-            alert(error.message);
-        })
-        .finally(function () {
-            killBtn.disabled = killRemaining > 0;
-        });
+    openKillModal();
 }
 
 function resetGame() {
@@ -626,6 +977,28 @@ function fetchPlayer() {
             }
 
             renderTasks(data.tasks || {});
+
+            killTargets = Array.isArray(data.killTargets) ? data.killTargets : [];
+            if (!isImpostor) {
+                killTargets = [];
+            }
+            deadPlayersList = Array.isArray(data.deadPlayers) ? data.deadPlayers : [];
+            reportableBodies = deadPlayersList.filter(function (body) {
+                return body && !body.reported;
+            });
+
+            if (deathNoteEl) {
+                if (data.deathNote) {
+                    deathNoteEl.textContent = data.deathNote;
+                    deathNoteEl.classList.remove("hidden");
+                } else {
+                    deathNoteEl.textContent = "";
+                    deathNoteEl.classList.add("hidden");
+                }
+            }
+            if (roleCardEl) {
+                roleCardEl.classList.toggle("dead", !isAlive);
+            }
 
             const killValue = typeof data.killRemaining === "number" ? data.killRemaining : parseInt(data.killRemaining, 10);
             killRemaining = isNaN(killValue) ? 0 : killValue;

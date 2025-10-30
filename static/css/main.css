@@ -531,6 +531,23 @@ button:not(:disabled):hover {
     box-shadow: 0 6px 14px rgba(99, 102, 241, 0.35);
 }
 
+.vote-grid button.has-voted {
+    border-color: rgba(34, 197, 94, 0.65);
+    box-shadow: inset 0 0 0 1px rgba(34, 197, 94, 0.35);
+}
+
+.vote-grid button.has-voted .vote-name::after {
+    content: "Votou";
+    font-size: 0.7rem;
+    margin-left: 0.65rem;
+    padding: 0.1rem 0.45rem;
+    border-radius: 999px;
+    background: rgba(34, 197, 94, 0.18);
+    color: #bbf7d0;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
 .vote-grid button.skip {
     background: rgba(249, 115, 22, 0.18);
     border-color: rgba(249, 115, 22, 0.55);
@@ -559,6 +576,73 @@ button:not(:disabled):hover {
 
 .meeting-feedback {
     min-height: 1.5rem;
+}
+
+.meeting-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    margin-bottom: 1rem;
+}
+
+.meeting-deceased {
+    margin-bottom: 1rem;
+    display: grid;
+    gap: 0.6rem;
+}
+
+.meeting-deceased.hidden {
+    display: none;
+}
+
+.meeting-deceased .deceased-card {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
+.meeting-deceased .deceased-card .avatar {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    object-fit: cover;
+    border: 1px solid rgba(248, 113, 113, 0.55);
+    background: rgba(248, 113, 113, 0.25);
+}
+
+.meeting-deceased .deceased-card.reported {
+    border-color: rgba(253, 224, 71, 0.45);
+    background: rgba(253, 224, 71, 0.12);
+}
+
+.meeting-deceased .deceased-card .name {
+    font-weight: 600;
+}
+
+.meeting-deceased .deceased-card .info {
+    font-size: 0.85rem;
+    color: #cbd5f5;
+}
+
+.meeting-deceased .deceased-card .info span {
+    display: block;
+}
+
+.death-note {
+    margin-top: 0.85rem;
+    padding: 0.75rem 1rem;
+    border-radius: 12px;
+    background: rgba(248, 113, 113, 0.15);
+    border: 1px solid rgba(248, 113, 113, 0.4);
+    color: #fecaca;
+}
+
+.death-note.hidden {
+    display: none;
 }
 
 .summary-text {
@@ -590,6 +674,36 @@ button:not(:disabled):hover {
 
 #game-over-overlay .overlay-card {
     text-align: center;
+}
+
+.overlay-card.narrow {
+    width: min(360px, 92%);
+}
+
+.overlay-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+}
+
+.overlay-actions button {
+    min-width: 120px;
+}
+
+.game-overlay.intro-phase .overlay-card {
+    animation: meetingIntro 0.9s ease forwards;
+}
+
+@keyframes meetingIntro {
+    0% {
+        transform: translateY(18px);
+        opacity: 0;
+    }
+    100% {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 .impostor-reveal {
