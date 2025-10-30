@@ -218,6 +218,16 @@ button:not(:disabled):hover {
     border-color: rgba(45, 212, 191, 0.4);
 }
 
+.role-card.impostor {
+    background: rgba(127, 29, 29, 0.38);
+    border-color: rgba(248, 113, 113, 0.4);
+}
+
+.role-card.leader {
+    box-shadow: 0 0 18px rgba(250, 204, 21, 0.25);
+    border-color: rgba(250, 204, 21, 0.5);
+}
+
 .task-columns {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -247,6 +257,34 @@ button:not(:disabled):hover {
     padding: 0.5rem 0.75rem;
     border-radius: 8px;
     background: rgba(15, 23, 42, 0.6);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    transition: background 0.2s ease;
+}
+
+.task-group li:hover {
+    background: rgba(30, 41, 59, 0.7);
+}
+
+.task-group li input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    accent-color: #22d3ee;
+    flex-shrink: 0;
+}
+
+.task-group li .task-name {
+    flex: 1;
+}
+
+.task-group li.done {
+    opacity: 0.65;
+}
+
+.task-group li.done .task-name {
+    text-decoration: line-through;
+    color: #94a3b8;
 }
 
 .impostor-tools {
@@ -267,6 +305,251 @@ button:not(:disabled):hover {
     display: flex;
     gap: 1rem;
     flex-wrap: wrap;
+}
+
+.task-progress {
+    margin: 2rem 0;
+    display: grid;
+    gap: 0.75rem;
+}
+
+.progress-track {
+    height: 14px;
+    border-radius: 999px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(135deg, #22d3ee, #6366f1);
+    box-shadow: 0 6px 18px rgba(99, 102, 241, 0.45);
+    transition: width 0.6s ease;
+}
+
+.progress-bar.progress-flash {
+    animation: progressFlash 0.6s ease;
+}
+
+.progress-label {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.game-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(8, 11, 19, 0.82);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 40;
+}
+
+.game-overlay.hidden {
+    display: none;
+}
+
+.overlay-card {
+    background: rgba(15, 23, 42, 0.92);
+    border-radius: 18px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    padding: 2rem;
+    width: min(420px, 92%);
+    box-shadow: 0 20px 50px rgba(2, 6, 23, 0.55);
+    display: grid;
+    gap: 1.25rem;
+}
+
+.vote-grid {
+    display: grid;
+    gap: 0.75rem;
+}
+
+.vote-grid button {
+    width: 100%;
+    padding: 0.85rem 1rem;
+    border-radius: 12px;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: rgba(30, 41, 59, 0.75);
+    color: #f8fafc;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.1s ease, border-color 0.2s ease, background 0.2s ease;
+}
+
+.vote-grid button:hover {
+    transform: translateY(-1px);
+    border-color: rgba(96, 165, 250, 0.7);
+}
+
+.vote-grid button.selected {
+    background: linear-gradient(135deg, #38bdf8, #6366f1);
+    border-color: transparent;
+    box-shadow: 0 6px 14px rgba(99, 102, 241, 0.35);
+}
+
+.vote-grid button.skip {
+    background: rgba(249, 115, 22, 0.18);
+    border-color: rgba(249, 115, 22, 0.55);
+    color: #fed7aa;
+}
+
+.meeting-feedback {
+    min-height: 1.5rem;
+}
+
+.summary-text {
+    font-weight: 600;
+}
+
+.summary-votes {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.5rem;
+}
+
+.summary-votes li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 0.75rem;
+    border-radius: 10px;
+    background: rgba(30, 41, 59, 0.6);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+}
+
+.summary-votes li .count {
+    font-weight: 700;
+    color: #93c5fd;
+}
+
+#game-over-overlay .overlay-card {
+    text-align: center;
+}
+
+.impostor-reveal {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: radial-gradient(circle at center, rgba(239, 68, 68, 0.35), rgba(8, 11, 19, 0.94));
+    z-index: 60;
+}
+
+.impostor-reveal.hidden {
+    display: none;
+}
+
+.impostor-reveal .reveal-content {
+    text-align: center;
+}
+
+.impostor-reveal .reveal-content.play {
+    animation: impostorPulse 2.8s ease both;
+}
+
+.reveal-title {
+    font-size: 3.2rem;
+    letter-spacing: 0.25em;
+    text-transform: uppercase;
+    color: #f87171;
+    text-shadow: 0 0 20px rgba(248, 113, 113, 0.9);
+    margin-bottom: 2rem;
+}
+
+.reveal-character {
+    width: 140px;
+    height: 180px;
+    background: linear-gradient(180deg, #f97316, #ea580c);
+    border-radius: 60px 60px 40px 40px;
+    margin: 0 auto;
+    position: relative;
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.45);
+    animation: floaty 2.6s ease-in-out infinite;
+}
+
+.reveal-character .visor {
+    position: absolute;
+    top: 48px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 82px;
+    height: 48px;
+    border-radius: 24px;
+    background: linear-gradient(135deg, #bae6fd, #38bdf8);
+    box-shadow: inset -6px -6px 12px rgba(14, 116, 144, 0.45);
+}
+
+.reveal-character .shadow {
+    position: absolute;
+    bottom: -24px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 120px;
+    height: 30px;
+    border-radius: 999px;
+    background: rgba(2, 6, 23, 0.55);
+    filter: blur(6px);
+    animation: shadowPulse 2.6s ease-in-out infinite;
+}
+
+@keyframes impostorPulse {
+    0% {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    10% {
+        opacity: 1;
+    }
+    80% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    100% {
+        opacity: 0;
+        transform: scale(1.05);
+    }
+}
+
+@keyframes progressFlash {
+    0% {
+        box-shadow: 0 0 0 rgba(99, 102, 241, 0.0);
+    }
+    50% {
+        box-shadow: 0 12px 26px rgba(99, 102, 241, 0.55);
+    }
+    100% {
+        box-shadow: 0 6px 18px rgba(99, 102, 241, 0.45);
+    }
+}
+
+@keyframes floaty {
+    0%,
+    100% {
+        transform: translateY(0);
+    }
+    50% {
+        transform: translateY(-12px);
+    }
+}
+
+@keyframes shadowPulse {
+    0%,
+    100% {
+        transform: translateX(-50%) scale(1);
+        opacity: 0.5;
+    }
+    50% {
+        transform: translateX(-50%) scale(0.85);
+        opacity: 0.35;
+    }
 }
 
 @media (max-width: 600px) {

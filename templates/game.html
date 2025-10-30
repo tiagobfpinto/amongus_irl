@@ -1,6 +1,6 @@
-{% extends "base.html" %}
+﻿{% extends "base.html" %}
 
-{% block title %}Em jogo · Among Us IRL{% endblock %}
+{% block title %}Em jogo - Among Us IRL{% endblock %}
 
 {% block nav %}
 <form action="{{ url_for('leave') }}" method="post">
@@ -9,45 +9,93 @@
 {% endblock %}
 
 {% block content %}
+<div id="impostor-reveal" class="impostor-reveal hidden">
+    <div class="reveal-content">
+        <p class="reveal-title">IMPOSTOR</p>
+        <div class="reveal-character">
+            <span class="visor"></span>
+            <span class="shadow"></span>
+        </div>
+    </div>
+</div>
+
 <section class="card game-view">
     <h1>Ronda ativa</h1>
-    <p class="muted">Partilha apenas a tua própria tela. Cada jogador vê o seu papel e tarefas.</p>
+    <p class="muted">
+        Partilha apenas a tua propria tela. Cada jogador ve o seu papel, tarefas e acompanha as reunioes aqui.
+    </p>
 
     <div id="role-card" class="role-card">
-        <h2>Tu és <span id="role-name">...</span></h2>
+        <h2>Tu es <span id="role-name">...</span></h2>
         <p id="role-hint" class="muted"></p>
+        <p id="leader-badge" class="muted hidden">Tu es o lider. Usa o botao Terminar jogo se precisares.</p>
     </div>
+
+    <section class="task-progress">
+        <h3>Progresso das tarefas</h3>
+        <div class="progress-track">
+            <div id="task-progress-bar" class="progress-bar"></div>
+        </div>
+        <p id="task-progress-label" class="progress-label muted">0 de 0 tarefas reveladas.</p>
+    </section>
 
     <section class="tasks">
         <h3>Tarefas</h3>
         <div class="task-columns">
             <div class="task-group">
                 <h4>Common</h4>
-                <ul id="tasks-common"></ul>
+                <ul id="tasks-common" class="task-list"></ul>
             </div>
             <div class="task-group">
                 <h4>Long</h4>
-                <ul id="tasks-long"></ul>
+                <ul id="tasks-long" class="task-list"></ul>
             </div>
             <div class="task-group">
                 <h4>Fast</h4>
-                <ul id="tasks-fast"></ul>
+                <ul id="tasks-fast" class="task-list"></ul>
             </div>
         </div>
     </section>
 
     <section id="impostor-tools" class="impostor-tools hidden">
         <h3>Ferramentas do impostor</h3>
-        <p class="muted">Podes simular tarefas, mas só matar quando o cooldown terminar.</p>
+        <p class="muted">Finge fazer tarefas e usa o botao assim que estiver disponivel.</p>
         <button id="kill-btn" class="danger">Matei</button>
         <div id="kill-timer" class="kill-timer muted">Cooldown: 0s</div>
     </section>
 
     <div class="game-actions">
+        <button id="report-btn" class="danger">Reportar corpo</button>
         <button id="refresh-btn" class="ghost">Atualizar dados</button>
-        <button id="reset-btn" class="ghost">Voltar ao lobby</button>
+        <button id="reset-btn" class="ghost hidden">Terminar jogo</button>
     </div>
 </section>
+
+<div id="meeting-overlay" class="game-overlay hidden">
+    <div class="overlay-card">
+        <h2>Reuniao</h2>
+        <p class="muted">Tempo restante: <span id="meeting-timer">150s</span></p>
+        <div id="meeting-options" class="vote-grid"></div>
+        <p id="meeting-feedback" class="meeting-feedback muted"></p>
+    </div>
+</div>
+
+<div id="meeting-summary" class="game-overlay hidden">
+    <div class="overlay-card">
+        <h2>Resultado da reuniao</h2>
+        <div id="meeting-summary-text" class="summary-text"></div>
+        <ul id="meeting-summary-votes" class="summary-votes"></ul>
+        <button id="meeting-summary-close" class="primary">Continuar</button>
+    </div>
+</div>
+
+<div id="game-over-overlay" class="game-overlay hidden">
+    <div class="overlay-card">
+        <h2 id="game-over-title">Fim de jogo</h2>
+        <p id="game-over-text" class="summary-text"></p>
+        <button id="game-over-reset" class="primary">Voltar ao lobby</button>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}

@@ -8,6 +8,7 @@ const statusLabel = document.getElementById("game-status");
 
 let isReady = false;
 let pollingTimer = null;
+let leaderId = "";
 
 function setMessage(text, variant = "info") {
     if (!messageBox) {
@@ -24,12 +25,16 @@ function setMessage(text, variant = "info") {
 }
 
 function renderPlayers(players) {
+    if (!playersList) {
+        return;
+    }
     playersList.innerHTML = "";
     let readyCount = 0;
 
     players.forEach((player) => {
         const li = document.createElement("li");
-        li.textContent = player.name;
+        const name = player.leader ? `${player.name} (Lider)` : player.name;
+        li.textContent = name;
         if (player.is_me) {
             li.classList.add("me");
             isReady = player.ready;
@@ -60,11 +65,18 @@ async function fetchState() {
         }
         const data = await response.json();
         playerCountLabel.textContent = data.playerCount.toString();
-        statusLabel.textContent = data.status === "in_game" ? "Jogo em curso" : "Lobby";
+        leaderId = data.leaderId || "";
+        const statusMap = {
+            lobby: "Lobby",
+            in_game: "Jogo em curso",
+            meeting: "Reuniao",
+            ended: "Terminado",
+        };
+        statusLabel.textContent = statusMap[data.status] || data.status;
 
         renderPlayers(data.players || []);
 
-        if (data.status === "in_game") {
+        if (["in_game", "meeting", "ended"].includes(data.status)) {
             window.location.href = "/game";
             return;
         }
@@ -72,18 +84,18 @@ async function fetchState() {
         const remaining = Math.max(0, data.requiredPlayers - data.playerCount);
         if (data.playerCount < data.requiredPlayers) {
             setMessage(
-                `Faltam ${remaining} jogador(es) para atingir o mínimo de ${data.requiredPlayers}.`
+                `Faltam ${remaining} jogador(es) para atingir o minimo de ${data.requiredPlayers}.`
             );
         } else if (!data.everyoneReady) {
-            setMessage("Nem todos estão prontos ainda.");
+            setMessage("Nem todos estao prontos ainda.");
         } else {
-            setMessage("Tudo pronto! Qualquer pessoa pode começar.");
+            setMessage("Tudo pronto! Qualquer pessoa pode comecar.");
         }
 
         startBtn.disabled = !data.canStart;
     } catch (error) {
         console.error(error);
-        setMessage("Não foi possível obter o estado do lobby. A tentar de novo...", "error");
+        setMessage("Nao foi possivel obter o estado do lobby. A tentar de novo...", "error");
     }
 }
 
@@ -115,14 +127,13 @@ async function startGame() {
         const response = await fetch("/api/start", { method: "POST" });
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.ok) {
-            throw new Error(data.error || "Não foi possível iniciar o jogo.");
+            throw new Error(data.error || "Nao foi possivel iniciar o jogo.");
         }
         window.location.href = data.redirect || "/game";
     } catch (error) {
         console.error(error);
         setMessage(error.message, "error");
     } finally {
-        // enable again so someone else can try
         startBtn.disabled = false;
     }
 }
@@ -130,8 +141,12 @@ async function startGame() {
 function setup() {
     fetchState();
     pollingTimer = setInterval(fetchState, 2500);
-    readyBtn?.addEventListener("click", toggleReady);
-    startBtn?.addEventListener("click", startGame);
+    if (readyBtn) {
+        readyBtn.addEventListener("click", toggleReady);
+    }
+    if (startBtn) {
+        startBtn.addEventListener("click", startGame);
+    }
 }
 
 window.addEventListener("DOMContentLoaded", setup);
