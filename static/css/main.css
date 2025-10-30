@@ -560,6 +560,31 @@ button:not(:disabled):hover {
     align-items: center;
     gap: 0.75rem;
 }
+.vote-option.with-cross {
+    position: relative;
+}
+.vote-grid button.disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+.cross-mark {
+    position: absolute;
+    top: -8px;
+    right: -8px;
+    font-weight: 700;
+    font-size: 1.35rem;
+    color: #f87171;
+    text-shadow: 0 0 6px rgba(15, 23, 42, 0.85);
+    pointer-events: none;
+}
+.vote-option.with-cross .cross-mark {
+    top: -10px;
+    right: -10px;
+}
+.meeting-deceased .deceased-card .cross-mark {
+    top: -6px;
+    right: -6px;
+}
 
 .vote-avatar {
     width: 44px;
@@ -584,6 +609,9 @@ button:not(:disabled):hover {
     gap: 0.35rem;
     margin-bottom: 1rem;
 }
+#meeting-reporter {
+    margin-bottom: 0.75rem;
+}
 
 .meeting-deceased {
     margin-bottom: 1rem;
@@ -603,6 +631,7 @@ button:not(:disabled):hover {
     border-radius: 12px;
     background: rgba(15, 23, 42, 0.55);
     border: 1px solid rgba(248, 113, 113, 0.35);
+    position: relative;
 }
 
 .meeting-deceased .deceased-card .avatar {
@@ -630,6 +659,18 @@ button:not(:disabled):hover {
 
 .meeting-deceased .deceased-card .info span {
     display: block;
+}
+.meeting-deceased .deceased-card .status-tag {
+    display: inline-block;
+    margin-top: 0.35rem;
+    padding: 0.2rem 0.55rem;
+    border-radius: 999px;
+    background: rgba(253, 224, 71, 0.15);
+    color: #fde047;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
 }
 
 .death-note {

@@ -83,6 +83,7 @@ class Player:
     killed_by: Optional[str] = None
     killed_by_name: Optional[str] = None
     death_reported: bool = False
+    left_game: bool = False
 
     def lobby_payload(self, current_id: str, leader_id: Optional[str]) -> Dict[str, object]:
         return {
@@ -106,6 +107,7 @@ class Player:
             "killedByName": self.killed_by_name,
             "reported": self.death_reported,
             "avatar": self.avatar,
+            "leftGame": self.left_game,
         }
         if viewer_id != self.player_id:
             payload.pop("killedAt", None)
@@ -158,10 +160,11 @@ class GameState:
         return self.players.get(player_id)
 
     def _assign_new_leader_locked(self) -> None:
-        if not self.players:
+        active_players = [player for player in self.players.values() if not player.left_game]
+        if not active_players:
             self.leader_id = None
             return
-        leader = min(self.players.values(), key=lambda player: player.joined_at)
+        leader = min(active_players, key=lambda player: player.joined_at)
         self.leader_id = leader.player_id
 
     def _allocate_avatar_locked(self) -> str:
@@ -192,22 +195,35 @@ class GameState:
 
     def remove_player(self, player_id: str) -> bool:
         with self._lock:
-            removed = self.players.pop(player_id, None)
-            if not removed:
+            player = self.players.get(player_id)
+            if not player:
                 return False
-            self._release_avatar_locked(removed.avatar)
-            if removed.player_id == self.leader_id:
+
+            if self.status in {"in_game", "meeting"}:
+                self._handle_player_departure_locked(player)
+                self._release_avatar_locked(player.avatar)
+            else:
+                removed = self.players.pop(player_id, None)
+                if not removed:
+                    return False
+                self._release_avatar_locked(removed.avatar)
+                if removed.player_id == self.leader_id:
+                    self._assign_new_leader_locked()
+            if player.player_id == self.leader_id and player.left_game:
                 self._assign_new_leader_locked()
             return True
 
     def is_empty(self) -> bool:
         with self._lock:
-            return not self.players
+            return not any(not player.left_game for player in self.players.values())
 
     def has_player_named(self, name: str) -> bool:
         name_key = name.strip().lower()
         with self._lock:
-            return any(player.name.lower() == name_key for player in self.players.values())
+            return any(
+                player.name.lower() == name_key and not player.left_game
+                for player in self.players.values()
+            )
 
     def is_leader(self, player_id: str) -> bool:
         with self._lock:
@@ -218,6 +234,8 @@ class GameState:
             player = self.players.get(player_id)
             if not player:
                 return False
+            if player.left_game:
+                return False
             player.ready = ready
             return True
 
@@ -226,11 +244,13 @@ class GameState:
             return self._everyone_ready_unlocked()
 
     def _everyone_ready_unlocked(self) -> bool:
-        return bool(self.players) and all(p.ready for p in self.players.values())
+        active = [player for player in self.players.values() if not player.left_game]
+        return bool(active) and all(p.ready for p in active)
 
     def can_start(self) -> bool:
         with self._lock:
-            has_required_count = len(self.players) >= self.config["required_players"]
+            active = [player for player in self.players.values() if not player.left_game]
+            has_required_count = len(active) >= self.config["required_players"]
             return self.status == "lobby" and has_required_count and self._everyone_ready_unlocked()
 
     def _config_payload_unlocked(self) -> Dict[str, object]:
@@ -335,14 +355,15 @@ class GameState:
         with self._lock:
             if self.status != "lobby":
                 return {"ok": False, "error": "O jogo ja comecou."}
-            if len(self.players) < self.config["required_players"]:
+            active_players = [player for player in self.players.values() if not player.left_game]
+            if len(active_players) < self.config["required_players"]:
                 return {
                     "ok": False,
                     "error": f"Sao necessarios pelo menos {self.config['required_players']} jogadores.",
                 }
-            if not all(p.ready for p in self.players.values()):
+            if not all(p.ready for p in active_players):
                 return {"ok": False, "error": "Nem todos os jogadores estao prontos."}
-            if self.config["impostors"] >= len(self.players):
+            if self.config["impostors"] >= len(active_players):
                 return {"ok": False, "error": "Configuracao invalida: impostores a mais."}
 
             self.round_number += 1
@@ -351,10 +372,12 @@ class GameState:
             self.last_meeting_summary = None
             self.revealed_progress = 0.0
             self.end_info = None
-            all_ids = list(self.players.keys())
+            all_ids = [player.player_id for player in active_players]
             impostor_ids = set(random.sample(all_ids, self.config["impostors"]))
 
             for pid, player in self.players.items():
+                if player.left_game:
+                    continue
                 player.role = "impostor" if pid in impostor_ids else "crewmate"
                 player.tasks = self._build_tasks()
                 player.alive = True
@@ -366,6 +389,7 @@ class GameState:
                 player.killed_by = None
                 player.killed_by_name = None
                 player.death_reported = False
+                player.left_game = False
 
             return {"ok": True}
 
@@ -377,7 +401,11 @@ class GameState:
             self.last_meeting_summary = None
             self.revealed_progress = 0.0
             self.end_info = None
-            for player in self.players.values():
+            for pid, player in list(self.players.items()):
+                if player.left_game:
+                    self._release_avatar_locked(player.avatar)
+                    self.players.pop(pid, None)
+                    continue
                 player.ready = False
                 player.role = None
                 player.tasks = {}
@@ -387,6 +415,7 @@ class GameState:
                 player.killed_by = None
                 player.killed_by_name = None
                 player.death_reported = False
+                player.left_game = False
 
     def impostor_kill(self, player_id: str, target_id: str) -> Dict[str, object]:
         with self._lock:
@@ -485,10 +514,13 @@ class GameState:
             return {"ok": True, "task": target_task.to_payload(), "progress": progress_payload}
 
     def _alive_players_unlocked(self) -> List[Player]:
-        return [player for player in self.players.values() if player.alive]
+        return [player for player in self.players.values() if player.alive and not player.left_game]
 
     def _dead_players_unlocked(self) -> List[Player]:
         return [player for player in self.players.values() if not player.alive and player.death_time]
+
+    def _active_players_unlocked(self) -> List[Player]:
+        return [player for player in self.players.values() if not player.left_game]
 
     def _mark_player_dead_locked(self, victim: Player, killer: Optional[Player]) -> None:
         if not victim.alive:
@@ -503,6 +535,65 @@ class GameState:
             victim.killed_by_name = None
         victim.death_reported = False
 
+    def _handle_player_departure_locked(self, player: Player) -> None:
+        if player.left_game:
+            return
+
+        player.left_game = True
+        player.ready = False
+
+        if player.alive and player.role == "impostor":
+            player.alive = False
+            player.death_time = time.time()
+            player.killed_by = None
+            player.killed_by_name = None
+            player.death_reported = True
+            player.tasks = {}
+            self.meeting = None
+            self.last_meeting_summary = None
+            self.status = "ended"
+            self.end_info = {
+                "winner": "crewmates",
+                "reason": "impostor_left",
+                "impostor": {"id": player.player_id, "name": player.name},
+                "message": f"O impostor {player.name} abandonou o jogo. Tripulacao vence!",
+            }
+            return
+
+        if player.alive:
+            self._mark_player_dead_locked(player, None)
+            player.death_reported = True
+        player.tasks = {}
+
+        if self.meeting:
+            self.meeting["votes"].pop(player.player_id, None)
+            if self.status == "meeting":
+                self._maybe_finalize_meeting_locked()
+
+        if self.status == "in_game":
+            impostor_survivor = self._impostor_last_crewmate_locked()
+            if impostor_survivor:
+                self.status = "ended"
+                self.end_info = {
+                    "winner": "impostor",
+                    "reason": "last_crewmate",
+                    "impostor": {
+                        "id": impostor_survivor.player_id,
+                        "name": impostor_survivor.name,
+                    },
+                    "message": f"O impostor {impostor_survivor.name} Venceu!",
+                }
+                self.meeting = None
+            elif not any(
+                p.alive and p.role == "impostor" and not p.left_game for p in self.players.values()
+            ):
+                self.status = "ended"
+                self.end_info = {
+                    "winner": "crewmates",
+                    "reason": "impostors_gone",
+                    "message": "Todos os impostores foram eliminados. Tripulacao vence!",
+                }
+                self.meeting = None
     def _impostor_last_crewmate_locked(self) -> Optional[Player]:
         alive_players = self._alive_players_unlocked()
         impostors = [player for player in alive_players if player.role == "impostor"]
@@ -694,7 +785,7 @@ class GameState:
         votes = self.meeting["votes"]
         alive_players = []
         for p in self.players.values():
-            if not p.alive:
+            if not p.alive or p.left_game:
                 continue
             alive_players.append(
                 {
@@ -722,6 +813,16 @@ class GameState:
             }
             if reported_body.player_id == current_player_id and reported_body.killed_by_name:
                 reported_payload["killedByName"] = reported_body.killed_by_name
+            reported_payload["leftGame"] = reported_body.left_game
+
+        reporter_payload = None
+        caller = self.players.get(self.meeting["caller"])
+        if caller:
+            reporter_payload = {
+                "id": caller.player_id,
+                "name": caller.name,
+                "avatar": caller.avatar,
+            }
 
         votes = self.meeting["votes"]
         return {
@@ -731,6 +832,7 @@ class GameState:
             "alivePlayers": alive_players,
             "deceased": deceased_players,
             "reportedBody": reported_payload,
+            "reporter": reporter_payload,
             "voted": list(votes.keys()),
             "votingStartsIn": voting_starts_in,
             "myVote": votes.get(current_player_id),
@@ -836,12 +938,14 @@ class GameState:
 
     def lobby_snapshot(self, current_id: str) -> Dict[str, object]:
         with self._lock:
-            players = [p.lobby_payload(current_id, self.leader_id) for p in self.players.values()]
-            player_count = len(self.players)
+            active_players = [p for p in self.players.values() if not p.left_game]
+            players = [p.lobby_payload(current_id, self.leader_id) for p in active_players]
+            player_count = len(active_players)
             required = self.config["required_players"]
             status = self.status
-            everyone_ready = bool(self.players) and all(p.ready for p in self.players.values())
+            everyone_ready = bool(active_players) and all(p.ready for p in active_players)
             can_start = status == "lobby" and player_count >= required and everyone_ready
+            leader = self.players.get(self.leader_id) if self.leader_id else None
             payload = {
                 "code": self.code,
                 "status": status,
@@ -852,7 +956,7 @@ class GameState:
                 "canStart": can_start,
                 "players": players,
                 "leaderId": self.leader_id,
-                "leaderName": self.players[self.leader_id].name if self.leader_id else None,
+                "leaderName": leader.name if leader else None,
                 "config": self._config_payload_unlocked(),
                 "configLimits": self._config_limits_payload(),
             }

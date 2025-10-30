@@ -29,6 +29,7 @@ const impostorRevealEl = document.getElementById("impostor-reveal");
 const impostorRevealContent = impostorRevealEl ? impostorRevealEl.querySelector(".reveal-content") : null;
 const deathNoteEl = document.getElementById("death-note");
 const meetingLockEl = document.getElementById("meeting-lock");
+const meetingReporterEl = document.getElementById("meeting-reporter");
 const meetingDeceasedEl = document.getElementById("meeting-deceased");
 const killOverlay = document.getElementById("kill-overlay");
 const killOptionsEl = document.getElementById("kill-options");
@@ -301,7 +302,7 @@ function renderMeetingDeceased(meeting) {
     meetingDeceasedEl.classList.remove("hidden");
     deceased.forEach(function (entry) {
         const card = document.createElement("div");
-        card.classList.add("deceased-card");
+        card.classList.add("deceased-card", "with-cross");
         if (entry.reported || (meeting.reportedBody && meeting.reportedBody.id === entry.id)) {
             card.classList.add("reported");
         }
@@ -312,21 +313,41 @@ function renderMeetingDeceased(meeting) {
             avatar.classList.add("avatar");
             card.appendChild(avatar);
         }
+        const cross = document.createElement("span");
+        cross.classList.add("cross-mark");
+        cross.textContent = "X";
+        card.appendChild(cross);
         const infoWrap = document.createElement("div");
         infoWrap.classList.add("info");
         const nameSpan = document.createElement("span");
         nameSpan.classList.add("name");
         nameSpan.textContent = entry.name || "Jogador";
         infoWrap.appendChild(nameSpan);
-        if (entry.killedAt) {
+        if (entry.killedAt && !entry.leftGame) {
             const timeSpan = document.createElement("span");
             timeSpan.textContent = "Morto às " + formatTimeHM(entry.killedAt);
             infoWrap.appendChild(timeSpan);
+        }
+        if (entry.leftGame) {
+            const leftSpan = document.createElement("span");
+            leftSpan.textContent = "Saiu do jogo.";
+            infoWrap.appendChild(leftSpan);
         }
         if (entry.killedByName) {
             const killerSpan = document.createElement("span");
             killerSpan.textContent = "Por " + entry.killedByName;
             infoWrap.appendChild(killerSpan);
+        }
+        if (meeting && meeting.reportedBody && meeting.reportedBody.id === entry.id) {
+            const tag = document.createElement("span");
+            tag.classList.add("status-tag");
+            tag.textContent = "Corpo reportado";
+            infoWrap.appendChild(tag);
+        } else if (entry.reported) {
+            const tag = document.createElement("span");
+            tag.classList.add("status-tag");
+            tag.textContent = "Ja reportado";
+            infoWrap.appendChild(tag);
         }
         card.appendChild(infoWrap);
         meetingDeceasedEl.appendChild(card);
@@ -334,6 +355,15 @@ function renderMeetingDeceased(meeting) {
 }
 
 function renderMeetingStatus(meeting) {
+    if (meetingReporterEl) {
+        if (meeting && meeting.reporter) {
+            meetingReporterEl.textContent = "Reportado por " + meeting.reporter.name;
+            meetingReporterEl.classList.remove("hidden");
+        } else {
+            meetingReporterEl.textContent = "";
+            meetingReporterEl.classList.add("hidden");
+        }
+    }
     if (meetingLockEl) {
         if (votingLocked && votingRemaining > 0) {
             meetingLockEl.textContent = "Votacoes iniciam em " + votingRemaining + "s";
@@ -388,6 +418,11 @@ function renderMeetingOptions(meeting) {
         }
         btn.disabled = disabled;
         btn.addEventListener("click", function () {
+            const targetName = player.name || "este jogador";
+            const confirmed = window.confirm("Tens a certeza que queres expulsar " + targetName + "?");
+            if (!confirmed) {
+                return;
+            }
             sendVote(player.id);
         });
 
@@ -566,18 +601,23 @@ function renderReportOptions() {
         return;
     }
     reportOptionsEl.innerHTML = "";
-    if (!Array.isArray(reportableBodies) || reportableBodies.length === 0) {
+    const bodies = Array.isArray(deadPlayersList) ? deadPlayersList : [];
+    if (bodies.length === 0) {
         const p = document.createElement("p");
         p.classList.add("muted");
-        p.textContent = "Nao existem corpos por reportar.";
+        p.textContent = "Nao existem jogadores eliminados.";
         reportOptionsEl.appendChild(p);
         return;
     }
-    reportableBodies.forEach(function (body) {
+    const hasReportable =
+        Array.isArray(reportableBodies) && reportableBodies.some(function (body) {
+            return body && !body.reported;
+        });
+    bodies.forEach(function (body) {
         const btn = document.createElement("button");
         btn.type = "button";
         const option = document.createElement("div");
-        option.classList.add("vote-option");
+        option.classList.add("vote-option", "with-cross");
         if (body.avatar) {
             const avatar = document.createElement("img");
             avatar.src = body.avatar;
@@ -585,22 +625,49 @@ function renderReportOptions() {
             avatar.classList.add("vote-avatar");
             option.appendChild(avatar);
         }
+        const cross = document.createElement("span");
+        cross.classList.add("cross-mark");
+        cross.textContent = "X";
+        option.appendChild(cross);
         const label = document.createElement("span");
         label.classList.add("vote-name");
         label.textContent = body.name || "Jogador";
         option.appendChild(label);
-        if (body.killedAt) {
-            const info = document.createElement("span");
-            info.classList.add("muted");
+        const info = document.createElement("span");
+        info.classList.add("muted");
+        if (body.leftGame) {
+            info.textContent = "Saiu do jogo";
+        } else if (body.killedAt) {
             info.textContent = "Encontrado às " + formatTimeHM(body.killedAt);
-            option.appendChild(info);
+        } else {
+            info.textContent = "Eliminado";
+        }
+        option.appendChild(info);
+        if (body.reported) {
+            const tag = document.createElement("span");
+            tag.classList.add("status-tag");
+            tag.textContent = "Já reportado";
+            option.appendChild(tag);
+            btn.disabled = true;
+            btn.classList.add("disabled");
         }
         btn.appendChild(option);
-        btn.addEventListener("click", function () {
-            submitReport(body.id);
-        });
+        if (!btn.disabled) {
+            btn.addEventListener("click", function () {
+                submitReport(body.id);
+            });
+        }
         reportOptionsEl.appendChild(btn);
     });
+    if (reportFeedbackEl) {
+        if (!hasReportable) {
+            reportFeedbackEl.textContent = "Todos os corpos já foram reportados.";
+            reportFeedbackEl.classList.remove("hidden");
+        } else {
+            reportFeedbackEl.textContent = "";
+            reportFeedbackEl.classList.add("hidden");
+        }
+    }
 }
 
 function openReportModal() {
@@ -686,6 +753,10 @@ function hideMeeting() {
         return;
     }
     meetingOverlay.classList.add("hidden");
+    if (meetingReporterEl) {
+        meetingReporterEl.textContent = "";
+        meetingReporterEl.classList.add("hidden");
+    }
     stopMeetingCountdown();
     stopVotingDelay();
     lastMeetingId = null;
