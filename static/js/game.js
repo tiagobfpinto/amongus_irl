@@ -38,6 +38,13 @@ const reportOverlay = document.getElementById("report-overlay");
 const reportOptionsEl = document.getElementById("report-options");
 const reportFeedbackEl = document.getElementById("report-feedback");
 const reportCancelBtn = document.getElementById("report-cancel");
+const sabotageBtn = document.getElementById("sabotage-btn");
+const sabotageStatusEl = document.getElementById("sabotage-status");
+const emergencyBtn = document.getElementById("emergency-btn");
+const commsOverlay = document.getElementById("comms-overlay");
+const commsCountdownEl = document.getElementById("comms-countdown");
+const medicPanel = document.getElementById("medic-panel");
+const medicVitalsEl = document.getElementById("medic-vitals");
 
 const POLL_INTERVAL = 4000;
 const SKIP_VOTE = "skip";
@@ -64,10 +71,18 @@ let votingLocked = false;
 let votingRemaining = 0;
 let meetingVoteCountdownTimer = null;
 let currentMeetingData = null;
+let specialRole = null;
+let isMedic = false;
+let commsCountdownTimer = null;
+let currentCommsRemaining = 0;
+let commsActive = false;
 
-function translateRole(role) {
+function translateRole(role, special) {
     if (role === "impostor") {
         return "Impostor";
+    }
+    if (special === "medic") {
+        return "Tripulante (Medico)";
     }
     if (role === "crewmate") {
         return "Tripulante";
@@ -75,9 +90,12 @@ function translateRole(role) {
     return "...";
 }
 
-function roleHint(role) {
+function roleHint(role, special) {
     if (role === "impostor") {
         return "Finge fazer tarefas e evita ser apanhado.";
+    }
+    if (special === "medic") {
+        return "Consegue ver as vitals para verificar quem continua vivo.";
     }
     if (role === "crewmate") {
         return "Completa as tuas tarefas e desconfia dos impostores.";
@@ -204,6 +222,10 @@ function updateKillUI() {
     if (killBtn) {
         killBtn.disabled = remaining > 0 || availableTargets === 0;
     }
+    if (sabotageBtn) {
+        const canSabotage = !commsActive && canUse;
+        sabotageBtn.disabled = !canSabotage;
+    }
     if (killTimerEl) {
         if (availableTargets === 0) {
             killTimerEl.textContent = "Sem alvos disponiveis.";
@@ -211,6 +233,7 @@ function updateKillUI() {
             killTimerEl.textContent = "Cooldown: " + remaining + "s";
         }
     }
+    updateSabotageStatus();
 }
 
 function startKillCountdown() {
@@ -325,7 +348,7 @@ function renderMeetingDeceased(meeting) {
         infoWrap.appendChild(nameSpan);
         if (entry.killedAt && !entry.leftGame) {
             const timeSpan = document.createElement("span");
-            timeSpan.textContent = "Morto às " + formatTimeHM(entry.killedAt);
+            timeSpan.textContent = "Morto as " + formatTimeHM(entry.killedAt);
             infoWrap.appendChild(timeSpan);
         }
         if (entry.leftGame) {
@@ -357,7 +380,11 @@ function renderMeetingDeceased(meeting) {
 function renderMeetingStatus(meeting) {
     if (meetingReporterEl) {
         if (meeting && meeting.reporter) {
-            meetingReporterEl.textContent = "Reportado por " + meeting.reporter.name;
+            const prefix =
+                meeting && meeting.type === "emergency"
+                    ? "Reuniao de emergencia chamada por "
+                    : "Reportado por ";
+            meetingReporterEl.textContent = prefix + (meeting.reporter.name || "Jogador");
             meetingReporterEl.classList.remove("hidden");
         } else {
             meetingReporterEl.textContent = "";
@@ -638,7 +665,7 @@ function renderReportOptions() {
         if (body.leftGame) {
             info.textContent = "Saiu do jogo";
         } else if (body.killedAt) {
-            info.textContent = "Encontrado às " + formatTimeHM(body.killedAt);
+            info.textContent = "Encontrado as " + formatTimeHM(body.killedAt);
         } else {
             info.textContent = "Eliminado";
         }
@@ -646,7 +673,7 @@ function renderReportOptions() {
         if (body.reported) {
             const tag = document.createElement("span");
             tag.classList.add("status-tag");
-            tag.textContent = "Já reportado";
+            tag.textContent = "Ja reportado";
             option.appendChild(tag);
             btn.disabled = true;
             btn.classList.add("disabled");
@@ -661,13 +688,127 @@ function renderReportOptions() {
     });
     if (reportFeedbackEl) {
         if (!hasReportable) {
-            reportFeedbackEl.textContent = "Todos os corpos já foram reportados.";
+            reportFeedbackEl.textContent = "Todos os corpos ja foram reportados.";
             reportFeedbackEl.classList.remove("hidden");
         } else {
             reportFeedbackEl.textContent = "";
             reportFeedbackEl.classList.add("hidden");
         }
     }
+}
+
+function updateSabotageStatus() {
+    if (!sabotageStatusEl) {
+        return;
+    }
+    if (!isImpostor || currentStatus !== "in_game") {
+        sabotageStatusEl.textContent = "";
+        return;
+    }
+    if (commsActive) {
+        sabotageStatusEl.textContent =
+            "Comunicacoes voltam em " + Math.max(0, currentCommsRemaining) + "s";
+    } else {
+        sabotageStatusEl.textContent = "Comunicacoes disponiveis.";
+    }
+}
+
+function stopCommsCountdown() {
+    if (commsCountdownTimer) {
+        clearInterval(commsCountdownTimer);
+        commsCountdownTimer = null;
+    }
+}
+
+function hideCommsOverlay() {
+    stopCommsCountdown();
+    commsActive = false;
+    currentCommsRemaining = 0;
+    if (commsOverlay) {
+        commsOverlay.classList.add("hidden");
+    }
+    if (commsCountdownEl) {
+        commsCountdownEl.textContent = "0";
+    }
+    updateSabotageStatus();
+    updateKillUI();
+}
+
+function showCommsOverlay(remainingSeconds) {
+    const seconds = Math.max(0, parseInt(remainingSeconds, 10) || 0);
+    if (seconds <= 0) {
+        hideCommsOverlay();
+        return;
+    }
+    commsActive = true;
+    currentCommsRemaining = seconds;
+    if (commsCountdownEl) {
+        commsCountdownEl.textContent = seconds;
+    }
+    if (commsOverlay) {
+        commsOverlay.classList.remove("hidden");
+    }
+    stopCommsCountdown();
+    commsCountdownTimer = setInterval(function () {
+        currentCommsRemaining = Math.max(0, currentCommsRemaining - 1);
+        if (commsCountdownEl) {
+            commsCountdownEl.textContent = Math.max(0, currentCommsRemaining);
+        }
+        if (currentCommsRemaining <= 0) {
+            hideCommsOverlay();
+        }
+    }, 1000);
+    updateSabotageStatus();
+    updateKillUI();
+}
+
+function renderMedicPanel(vitals) {
+    if (!medicPanel || !medicVitalsEl) {
+        return;
+    }
+    if (!isMedic || !Array.isArray(vitals) || vitals.length === 0) {
+        medicPanel.classList.add("hidden");
+        medicVitalsEl.innerHTML = "";
+        return;
+    }
+    medicPanel.classList.remove("hidden");
+    medicVitalsEl.innerHTML = "";
+    vitals
+        .slice()
+        .sort(function (a, b) {
+            const nameA = (a && a.name ? a.name : "").toLowerCase();
+            const nameB = (b && b.name ? b.name : "").toLowerCase();
+            return nameA.localeCompare(nameB);
+        })
+        .forEach(function (entry) {
+            if (!entry) {
+                return;
+            }
+            const li = document.createElement("li");
+            li.classList.add("vital");
+            if (entry.leftGame) {
+                li.classList.add("left");
+            } else if (entry.alive) {
+                li.classList.add("alive");
+            } else {
+                li.classList.add("dead");
+            }
+            const nameSpan = document.createElement("span");
+            nameSpan.classList.add("name");
+            nameSpan.textContent = entry.name || "Jogador";
+            li.appendChild(nameSpan);
+            const stateSpan = document.createElement("span");
+            stateSpan.classList.add("state");
+            if (entry.leftGame) {
+                stateSpan.textContent = "Saiu";
+            } else if (entry.alive) {
+                stateSpan.textContent = "Vivo";
+            } else {
+                stateSpan.textContent = "Morto";
+            }
+            li.appendChild(stateSpan);
+            medicVitalsEl.appendChild(li);
+        });
 }
 
 function openReportModal() {
@@ -680,6 +821,30 @@ function openReportModal() {
     }
     renderReportOptions();
     reportOverlay.classList.remove("hidden");
+}
+
+function callEmergencyMeeting() {
+    if (!emergencyBtn || emergencyBtn.disabled) {
+        return;
+    }
+    if (!isAlive || currentStatus !== "in_game") {
+        return;
+    }
+    emergencyBtn.disabled = true;
+    fetch("/api/meeting/emergency", { method: "POST" })
+        .then(parseJsonSafe)
+        .then(function (data) {
+            if (!data || !data.ok) {
+                const msg = data && data.error ? data.error : "Nao foi possivel chamar reuniao.";
+                throw new Error(msg);
+            }
+            fetchPlayer();
+        })
+        .catch(function (error) {
+            console.error(error);
+            alert(error.message);
+            emergencyBtn.disabled = false;
+        });
 }
 
 function submitReport(bodyId) {
@@ -767,6 +932,7 @@ function describeSummary(summary) {
     if (!summary) {
         return "Reuniao concluida.";
     }
+    const summaryType = summary.type;
     if (summary.gameOver) {
         if (summary.gameOver.message) {
             return summary.gameOver.message;
@@ -782,10 +948,14 @@ function describeSummary(summary) {
         return summary.ejected.name + " foi expulso.";
     }
     if (summary.outcome === "skipped") {
-        return "A votacao terminou em skip.";
+        return summaryType === "emergency"
+            ? "A reuniao de emergencia terminou em skip."
+            : "A votacao terminou em skip.";
     }
     if (summary.outcome === "no_votes") {
-        return "Ninguem votou nesta reuniao.";
+        return summaryType === "emergency"
+            ? "Reuniao de emergencia terminou sem votos."
+            : "Ninguem votou nesta reuniao.";
     }
     return "Reuniao terminada sem expulsao.";
 }
@@ -938,6 +1108,29 @@ function triggerKill() {
     openKillModal();
 }
 
+function triggerSabotage() {
+    if (!isImpostor || !isAlive || currentStatus !== "in_game" || !sabotageBtn) {
+        return;
+    }
+    sabotageBtn.disabled = true;
+    fetch("/api/impostor/sabotage", { method: "POST" })
+        .then(parseJsonSafe)
+        .then(function (data) {
+            if (!data || !data.ok) {
+                const msg = data && data.error ? data.error : "Nao podes sabotar agora.";
+                throw new Error(msg);
+            }
+            fetchPlayer();
+        })
+        .catch(function (error) {
+            console.error(error);
+            alert(error.message);
+        })
+        .finally(function () {
+            updateKillUI();
+        });
+}
+
 function resetGame() {
     if (!isLeader) {
         alert("Apenas o lider pode terminar o jogo.");
@@ -1005,41 +1198,44 @@ function fetchPlayer() {
                 hideMeeting();
                 hideMeetingSummary();
                 hideGameOver();
+                hideCommsOverlay();
                 window.location.href = "/lobby";
                 return;
             }
 
-        const role = data.role || "crewmate";
-        isImpostor = role === "impostor";
-        isAlive = data.alive !== false;
-        isLeader = data.isLeader === true;
-        if (leaderBadgeEl) {
-            leaderBadgeEl.classList.toggle("hidden", !isLeader);
-        }
-        if (resetBtn) {
-            resetBtn.classList.toggle("hidden", !isLeader);
-            resetBtn.disabled = !isLeader;
-        }
-        if (gameOverResetBtn) {
-            if (isLeader) {
-                gameOverResetBtn.textContent = "Terminar jogo";
-                gameOverResetBtn.disabled = false;
-            } else {
-                gameOverResetBtn.textContent = "Aguardar lider";
-                gameOverResetBtn.disabled = true;
+            const role = data.role || "crewmate";
+            specialRole = data.specialRole || null;
+            isMedic = specialRole === "medic";
+            isImpostor = role === "impostor";
+            isAlive = data.alive !== false;
+            isLeader = data.isLeader === true;
+            if (leaderBadgeEl) {
+                leaderBadgeEl.classList.toggle("hidden", !isLeader);
             }
-        }
+            if (resetBtn) {
+                resetBtn.classList.toggle("hidden", !isLeader);
+                resetBtn.disabled = !isLeader;
+            }
+            if (gameOverResetBtn) {
+                if (isLeader) {
+                    gameOverResetBtn.textContent = "Terminar jogo";
+                    gameOverResetBtn.disabled = false;
+                } else {
+                    gameOverResetBtn.textContent = "Aguardar lider";
+                    gameOverResetBtn.disabled = true;
+                }
+            }
 
             if (roleNameEl) {
-                roleNameEl.textContent = translateRole(role);
+                roleNameEl.textContent = translateRole(role, specialRole);
             }
-        if (roleCardEl) {
-            roleCardEl.classList.toggle("crewmate", role === "crewmate");
-            roleCardEl.classList.toggle("impostor", role === "impostor");
-            roleCardEl.classList.toggle("leader", isLeader);
-        }
+            if (roleCardEl) {
+                roleCardEl.classList.toggle("crewmate", role === "crewmate");
+                roleCardEl.classList.toggle("impostor", role === "impostor");
+                roleCardEl.classList.toggle("leader", isLeader);
+            }
             if (roleHintEl) {
-                roleHintEl.textContent = roleHint(role);
+                roleHintEl.textContent = roleHint(role, specialRole);
             }
 
             if (isImpostor && !impostorRevealShown && currentStatus !== "lobby") {
@@ -1048,6 +1244,7 @@ function fetchPlayer() {
             }
 
             renderTasks(data.tasks || {});
+            renderMedicPanel(isMedic ? data.vitals : null);
 
             killTargets = Array.isArray(data.killTargets) ? data.killTargets : [];
             if (!isImpostor) {
@@ -1071,7 +1268,22 @@ function fetchPlayer() {
                 roleCardEl.classList.toggle("dead", !isAlive);
             }
 
-            const killValue = typeof data.killRemaining === "number" ? data.killRemaining : parseInt(data.killRemaining, 10);
+            const commsData = data.commsSabotage || {};
+            if (
+                commsData &&
+                commsData.active &&
+                typeof commsData.remaining === "number" &&
+                commsData.remaining > 0
+            ) {
+                showCommsOverlay(commsData.remaining);
+            } else {
+                hideCommsOverlay();
+            }
+
+            const killValue =
+                typeof data.killRemaining === "number"
+                    ? data.killRemaining
+                    : parseInt(data.killRemaining, 10);
             killRemaining = isNaN(killValue) ? 0 : killValue;
             updateKillUI();
             if (killRemaining > 0) {
@@ -1101,9 +1313,25 @@ function fetchPlayer() {
                 hideGameOver();
             }
 
-            const cannotReport = !isAlive || data.status !== "in_game" || !!data.meeting || !!data.gameOver;
+            const cannotReport =
+                !isAlive || data.status !== "in_game" || !!data.meeting || !!data.gameOver;
             if (reportBtn) {
-                reportBtn.disabled = cannotReport;
+                reportBtn.disabled = cannotReport || commsActive;
+            }
+            if (emergencyBtn) {
+                const inGame = currentStatus === "in_game";
+                emergencyBtn.classList.toggle("hidden", !inGame);
+                const canEmergency =
+                    inGame &&
+                    data.emergencyAvailable &&
+                    isAlive &&
+                    !data.meeting &&
+                    !data.gameOver &&
+                    !commsActive;
+                emergencyBtn.textContent = data.emergencyAvailable
+                    ? "Chamar reuniao"
+                    : "Reuniao usada";
+                emergencyBtn.disabled = !canEmergency;
             }
         })
         .catch(function (error) {
@@ -1132,8 +1360,14 @@ function setup() {
     if (killBtn) {
         killBtn.addEventListener("click", triggerKill);
     }
+    if (sabotageBtn) {
+        sabotageBtn.addEventListener("click", triggerSabotage);
+    }
     if (reportBtn) {
         reportBtn.addEventListener("click", reportBody);
+    }
+    if (emergencyBtn) {
+        emergencyBtn.addEventListener("click", callEmergencyMeeting);
     }
     if (meetingSummaryCloseBtn) {
         meetingSummaryCloseBtn.addEventListener("click", function () {

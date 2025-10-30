@@ -32,9 +32,10 @@ def _default_task_pool() -> Dict[str, List[str]]:
         ],
         "long": [
             f"Desenha {random_drawing()} no quarto das crianças",
-            "Fazer castelo de cartas (quarto principal)",
-            "Encher saco do lixo, e levar lá para fora para o sitio certo",
+            "Montar castelo de cartas (casa de banho das crianças)",
+            "Encher saco do lixo na sala e meter na rampa dos carros",
             "Acertar nas 3 latas com uma bala de nerf (jardim)",
+            "Montar castelo de cartas (cozinha)"
         ],
         "fast": [
             "Beber conteudo do copo (cozinha)",
@@ -42,6 +43,13 @@ def _default_task_pool() -> Dict[str, List[str]]:
             "Download data in weapons",
             "Ligar TV do quarto principal",
             "Coloca toalha dentro da banheira (casa de banho)",
+            "Ordena garrafas de bebida pela primeira letra da marca (cozinha)",
+            "Empilhar 5 tampas umas em cima das outras (sala)",
+            "Fazer uma bebida (a ser decidida)",
+            "Ligar TV quarto das crianças",
+            "Ordenar latas de cerveja numeradas",
+            "Cortar uma rodela de limão",
+            "Fazer uma pila com o jogo do galo"
         ],
     }
 
@@ -74,6 +82,7 @@ class Player:
     name: str
     ready: bool = False
     role: Optional[str] = None  # "crewmate" or "impostor"
+    special_role: Optional[str] = None  # e.g. "medic"
     tasks: Dict[str, List[TaskItem]] = field(default_factory=dict)
     alive: bool = True
     kill_cooldown_end: float = 0.0
@@ -84,6 +93,7 @@ class Player:
     killed_by_name: Optional[str] = None
     death_reported: bool = False
     left_game: bool = False
+    emergency_available: bool = True
 
     def lobby_payload(self, current_id: str, leader_id: Optional[str]) -> Dict[str, object]:
         return {
@@ -155,6 +165,9 @@ class GameState:
         self.revealed_progress: float = 0.0
         self.end_info: Optional[Dict[str, object]] = None
         self._used_avatars: Set[str] = set()
+        self.comms_sabotage_end: float = 0.0
+        self.comms_sabotage_by: Optional[str] = None
+        self.comms_sabotage_duration: int = 60  # seconds
 
     def current_player(self, player_id: str) -> Optional[Player]:
         return self.players.get(player_id)
@@ -366,6 +379,7 @@ class GameState:
             if self.config["impostors"] >= len(active_players):
                 return {"ok": False, "error": "Configuracao invalida: impostores a mais."}
 
+            self._clear_comms_sabotage_locked()
             self.round_number += 1
             self.status = "in_game"
             self.meeting = None
@@ -390,6 +404,13 @@ class GameState:
                 player.killed_by_name = None
                 player.death_reported = False
                 player.left_game = False
+                player.special_role = None
+                player.emergency_available = True
+
+            medic_candidates = [p for p in self.players.values() if p.role == "crewmate" and not p.left_game]
+            if medic_candidates:
+                medic = random.choice(medic_candidates)
+                medic.special_role = "medic"
 
             return {"ok": True}
 
@@ -416,6 +437,35 @@ class GameState:
                 player.killed_by_name = None
                 player.death_reported = False
                 player.left_game = False
+                player.special_role = None
+                player.emergency_available = True
+            self._clear_comms_sabotage_locked()
+
+    def impostor_sabotage(self, player_id: str) -> Dict[str, object]:
+        with self._lock:
+            player = self.players.get(player_id)
+            if not player:
+                return {"ok": False, "error": "Jogador nao encontrado."}
+            if self.status != "in_game":
+                return {"ok": False, "error": "O jogo ainda nao comecou."}
+            if player.role != "impostor":
+                return {"ok": False, "error": "Apenas o impostor pode usar este botao."}
+            if player.left_game:
+                return {"ok": False, "error": "Jogador nao esta ativo."}
+
+            self._clear_expired_comms_locked()
+            if time.time() < self.comms_sabotage_end:
+                remaining = int(self.comms_sabotage_end - time.time())
+                return {
+                    "ok": False,
+                    "error": "As comunicacoes ja estao sabotadas.",
+                    "remaining": remaining,
+                }
+
+            now = time.time()
+            self.comms_sabotage_end = now + self.comms_sabotage_duration
+            self.comms_sabotage_by = player_id
+            return {"ok": True, "duration": self.comms_sabotage_duration}
 
     def impostor_kill(self, player_id: str, target_id: str) -> Dict[str, object]:
         with self._lock:
@@ -461,6 +511,9 @@ class GameState:
                     },
                     "message": f"O impostor {impostor_survivor.name} Venceu!",
                 }
+
+            if self.status == "ended":
+                self._clear_comms_sabotage_locked()
 
             return {
                 "ok": True,
@@ -522,6 +575,19 @@ class GameState:
     def _active_players_unlocked(self) -> List[Player]:
         return [player for player in self.players.values() if not player.left_game]
 
+    def _clear_expired_comms_locked(self) -> None:
+        if self.comms_sabotage_end and time.time() >= self.comms_sabotage_end:
+            self.comms_sabotage_end = 0.0
+            self.comms_sabotage_by = None
+
+    def _clear_comms_sabotage_locked(self) -> None:
+        self.comms_sabotage_end = 0.0
+        self.comms_sabotage_by = None
+
+    def _comms_remaining_locked(self) -> int:
+        self._clear_expired_comms_locked()
+        return max(0, int(self.comms_sabotage_end - time.time()))
+
     def _mark_player_dead_locked(self, victim: Player, killer: Optional[Player]) -> None:
         if not victim.alive:
             return
@@ -541,6 +607,8 @@ class GameState:
 
         player.left_game = True
         player.ready = False
+        player.special_role = None
+        player.emergency_available = False
 
         if player.alive and player.role == "impostor":
             player.alive = False
@@ -558,6 +626,7 @@ class GameState:
                 "impostor": {"id": player.player_id, "name": player.name},
                 "message": f"O impostor {player.name} abandonou o jogo. Tripulacao vence!",
             }
+            self._clear_comms_sabotage_locked()
             return
 
         if player.alive:
@@ -594,6 +663,8 @@ class GameState:
                     "message": "Todos os impostores foram eliminados. Tripulacao vence!",
                 }
                 self.meeting = None
+        if self.status == "ended":
+            self._clear_comms_sabotage_locked()
     def _impostor_last_crewmate_locked(self) -> Optional[Player]:
         alive_players = self._alive_players_unlocked()
         impostors = [player for player in alive_players if player.role == "impostor"]
@@ -601,6 +672,39 @@ class GameState:
         if len(impostors) == 1 and len(crewmates) <= 1:
             return impostors[0]
         return None
+
+    def call_emergency_meeting(self, caller_id: str) -> Dict[str, object]:
+        with self._lock:
+            caller = self.players.get(caller_id)
+            if not caller:
+                return {"ok": False, "error": "Jogador nao encontrado."}
+            if caller.left_game:
+                return {"ok": False, "error": "Jogador nao esta ativo."}
+            if not caller.alive:
+                return {"ok": False, "error": "Jogadores mortos nao podem chamar reuniao."}
+            if self.status != "in_game":
+                return {"ok": False, "error": "Nao podes chamar reuniao agora."}
+            if self.meeting:
+                return {"ok": False, "error": "Ja existe uma reuniao a decorrer."}
+            if not caller.emergency_available:
+                return {"ok": False, "error": "Ja usaste a tua reuniao de emergencia."}
+
+            caller.emergency_available = False
+            now = time.time()
+            meeting_id = str(uuid.uuid4())
+            self.status = "meeting"
+            self.meeting = {
+                "id": meeting_id,
+                "caller": caller_id,
+                "started_at": now,
+                "ends_at": now + self.config["meeting_duration"],
+                "votes": {},
+                "reported_body": None,
+                "voting_starts_at": now + self.MEETING_VOTE_DELAY,
+                "type": "emergency",
+            }
+            self._clear_comms_sabotage_locked()
+            return {"ok": True, "meetingId": meeting_id}
 
     def start_meeting(self, caller_id: str, body_id: Optional[str]) -> Dict[str, object]:
         with self._lock:
@@ -632,7 +736,9 @@ class GameState:
                 "votes": {},
                 "reported_body": reported_body.player_id,
                 "voting_starts_at": now + self.MEETING_VOTE_DELAY,
+                "type": "reported",
             }
+            self._clear_comms_sabotage_locked()
             return {"ok": True, "meetingId": meeting_id}
 
     def _maybe_finalize_meeting_locked(self) -> None:
@@ -688,6 +794,7 @@ class GameState:
         summary = {
             "id": meeting["id"],
             "caller": meeting["caller"],
+            "type": meeting.get("type", "reported"),
             "votes": votes_breakdown,
             "outcome": outcome,
             "progress": {
@@ -737,6 +844,8 @@ class GameState:
 
         self.last_meeting_summary = summary
         self.meeting = None
+        if self.status == "ended":
+            self._clear_comms_sabotage_locked()
 
     def cast_vote(self, voter_id: str, target_id: Optional[str]) -> Dict[str, object]:
         with self._lock:
@@ -828,6 +937,7 @@ class GameState:
         return {
             "id": self.meeting["id"],
             "caller": self.meeting["caller"],
+            "type": self.meeting.get("type", "reported"),
             "endsIn": remaining,
             "alivePlayers": alive_players,
             "deceased": deceased_players,
@@ -868,6 +978,7 @@ class GameState:
 
             if self.meeting:
                 self._maybe_finalize_meeting_locked()
+            self._clear_expired_comms_locked()
 
             total, completed = self._task_totals_unlocked()
             current_progress = completed / total if total else 0.0
@@ -884,7 +995,11 @@ class GameState:
             kill_targets = []
             if player.role == "impostor":
                 for other in self.players.values():
-                    if other.player_id == player_id or not other.alive:
+                    if (
+                        other.player_id == player_id
+                        or not other.alive
+                        or other.left_game
+                    ):
                         continue
                     kill_targets.append(
                         {
@@ -897,10 +1012,10 @@ class GameState:
             death_note = None
             if not player.alive and player.death_time and player.killed_by_name:
                 killed_at = time.strftime("%H:%M", time.localtime(player.death_time))
-                death_note = f"Foste morto às {killed_at} por {player.killed_by_name}."
+                death_note = f"Foste morto as {killed_at} por {player.killed_by_name}."
             elif not player.alive and player.death_time:
                 killed_at = time.strftime("%H:%M", time.localtime(player.death_time))
-                death_note = f"Foste morto às {killed_at}."
+                death_note = f"Foste morto as {killed_at}."
 
             payload = {
                 "ok": True,
@@ -923,9 +1038,29 @@ class GameState:
                     "current": current_progress,
                     "revealed": self.revealed_progress,
                 },
+                "specialRole": player.special_role,
+                "emergencyAvailable": player.emergency_available,
+            }
+            comms_remaining = self._comms_remaining_locked()
+            payload["commsSabotage"] = {
+                "active": comms_remaining > 0,
+                "remaining": comms_remaining,
             }
             if kill_targets:
                 payload["killTargets"] = kill_targets
+
+            if player.special_role == "medic":
+                vitals = []
+                for other in self.players.values():
+                    vitals.append(
+                        {
+                            "id": other.player_id,
+                            "name": other.name,
+                            "alive": other.alive and not other.left_game,
+                            "leftGame": other.left_game,
+                        }
+                    )
+                payload["vitals"] = vitals
 
             if meeting_payload:
                 payload["meeting"] = meeting_payload
@@ -1199,6 +1334,16 @@ def api_report():
     return jsonify(result), status_code
 
 
+@app.route("/api/meeting/emergency", methods=["POST"])
+def api_meeting_emergency():
+    lobby_obj, player = _current_context()
+    if not lobby_obj or not player:
+        return jsonify({"ok": False, "error": "Sessao expirada. Volta ao lobby."}), 404
+    result = lobby_obj.call_emergency_meeting(player.player_id)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
 @app.route("/api/meeting/vote", methods=["POST"])
 def api_meeting_vote():
     lobby_obj, player = _current_context()
@@ -1244,6 +1389,16 @@ def api_impostor_kill():
     data = request.get_json(silent=True) or {}
     target_id = data.get("targetId") or data.get("target_id")
     result = lobby_obj.impostor_kill(player.player_id, target_id or "")
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/impostor/sabotage", methods=["POST"])
+def api_impostor_sabotage():
+    lobby_obj, player = _current_context()
+    if not lobby_obj or not player:
+        return jsonify({"ok": False, "error": "Sessao expirada. Volta ao lobby."}), 404
+    result = lobby_obj.impostor_sabotage(player.player_id)
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 

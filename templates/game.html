@@ -19,6 +19,14 @@
     </div>
 </div>
 
+<div id="comms-overlay" class="game-overlay comms-overlay hidden">
+    <div class="static-layer"></div>
+    <div class="comms-content">
+        <p class="title">O impostor sabotou as comunicacoes...</p>
+        <p class="countdown">Comunicacoes de volta em <span id="comms-countdown">60</span> segundos.</p>
+    </div>
+</div>
+
 <section class="card game-view">
     <h1>Ronda ativa</h1>
     <p class="muted">
@@ -58,15 +66,23 @@
         </div>
     </section>
 
+    <section id="medic-panel" class="medic-panel hidden">
+        <h3>Vitals</h3>
+        <ul id="medic-vitals" class="medic-vitals"></ul>
+    </section>
+
     <section id="impostor-tools" class="impostor-tools hidden">
         <h3>Ferramentas do impostor</h3>
         <p class="muted">Finge fazer tarefas e usa o botao assim que estiver disponivel.</p>
         <button id="kill-btn" class="danger">Matei</button>
+        <button id="sabotage-btn" class="ghost">Sabotar comunicacoes</button>
         <div id="kill-timer" class="kill-timer muted">Cooldown: 0s</div>
+        <div id="sabotage-status" class="muted small"></div>
     </section>
 
     <div class="game-actions">
         <button id="report-btn" class="danger">Reportar corpo</button>
+        <button id="emergency-btn" class="primary">Chamar reuniao</button>
         <button id="refresh-btn" class="ghost">Atualizar dados</button>
         <button id="reset-btn" class="ghost hidden">Terminar jogo</button>
     </div>
