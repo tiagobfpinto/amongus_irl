@@ -1,18 +1,38 @@
 {% extends "base.html" %}
 
-{% block title %}Entrar no Lobby · Among Us IRL{% endblock %}
+{% block title %}Entrar ou Criar Lobby - Among Us IRL{% endblock %}
 
 {% block content %}
 <section class="card">
-    <h1>Entrar no Lobby</h1>
-    <p class="muted">Escolhe um nome e junta-te ao lobby padrão.</p>
-    {% if error %}
-    <div class="flash error">{{ error }}</div>
-    {% endif %}
-    <form action="{{ url_for('join') }}" method="post" class="form">
-        <label for="name">Nome do jogador</label>
-        <input id="name" name="name" type="text" maxlength="30" required autofocus placeholder="Ex.: Capitão Verde">
-        <button type="submit" class="primary">Entrar</button>
-    </form>
+    <h1>Among Us IRL</h1>
+    <p class="muted">Cria um novo lobby ou entra num existente com o codigo partilhado.</p>
+
+    <div class="lobby-options">
+        <section class="lobby-option">
+            <h2>Criar novo lobby</h2>
+            {% if create_error %}
+            <div class="flash error">{{ create_error }}</div>
+            {% endif %}
+            <form action="{{ url_for('create_lobby_route') }}" method="post" class="form">
+                <label for="create-name">Nome do jogador</label>
+                <input id="create-name" name="name" type="text" maxlength="30" required autofocus placeholder="Ex.: Capitao Verde" value="{{ create_name or '' }}">
+                <button type="submit" class="primary">Gerar codigo</button>
+            </form>
+        </section>
+
+        <section class="lobby-option">
+            <h2>Entrar num lobby</h2>
+            {% if join_error %}
+            <div class="flash error">{{ join_error }}</div>
+            {% endif %}
+            <form action="{{ url_for('join') }}" method="post" class="form">
+                <label for="join-code">Codigo do lobby</label>
+                <input id="join-code" name="code" type="text" maxlength="6" minlength="4" pattern="[A-Za-z0-9]{4,6}" required placeholder="Ex.: AB123" value="{{ join_code or '' }}">
+                <label for="join-name">Nome do jogador</label>
+                <input id="join-name" name="name" type="text" maxlength="30" required placeholder="Ex.: Capitao Verde" value="{{ join_name or '' }}">
+                <button type="submit" class="primary">Entrar</button>
+            </form>
+        </section>
+    </div>
 </section>
 {% endblock %}

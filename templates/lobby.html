@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Lobby · Among Us IRL{% endblock %}
+{% block title %}Lobby - Among Us IRL{% endblock %}
 
 {% block nav %}
 <form action="{{ url_for('leave') }}" method="post">
@@ -11,9 +11,19 @@
 {% block content %}
 <section class="card" id="lobby-card">
     <h1>Lobby</h1>
-    <p class="muted">Quando todos estiverem prontos, qualquer pessoa pode iniciar a ronda.</p>
+    <p class="muted">
+        Partilha o codigo com os teus amigos e ajusta as definicoes antes de comecar a partida.
+    </p>
 
     <div class="status-board">
+        <div>
+            <span class="status-label">Codigo</span>
+            <span id="lobby-code" class="status-value">{{ lobby_code or "----" }}</span>
+        </div>
+        <div>
+            <span class="status-label">Lider</span>
+            <span id="leader-name" class="status-value">Por definir</span>
+        </div>
         <div>
             <span class="status-label">Jogadores</span>
             <span id="player-count" class="status-value">0</span>
@@ -28,13 +38,33 @@
         </div>
     </div>
 
+    <section id="config-section" class="lobby-config">
+        <h2>Definicoes do lobby</h2>
+        <p class="muted small">Apenas o lider pode editar estes valores antes da partida.</p>
+        <div class="config-grid">
+            <label for="kill-cooldown-input">
+                Kill cooldown (s)
+                <input id="kill-cooldown-input" type="number" min="10" max="600" step="5">
+            </label>
+            <label for="required-players-input">
+                Jogadores necessarios
+                <input id="required-players-input" type="number" min="2" max="15" step="1">
+            </label>
+        </div>
+        <div class="config-actions">
+            <button id="save-config-btn" type="button" class="primary small">Guardar definicoes</button>
+            <span id="config-feedback" class="muted hidden"></span>
+        </div>
+    </section>
+
+    <h2>Jogadores</h2>
     <ul id="players" class="player-list"></ul>
 
     <div id="lobby-message" class="flash info hidden"></div>
 
     <div class="lobby-actions">
         <button id="ready-btn" class="primary">Estou pronto</button>
-        <button id="start-btn" class="success" disabled>Começar jogo</button>
+        <button id="start-btn" class="success" disabled>Comecar jogo</button>
     </div>
 </section>
 {% endblock %}

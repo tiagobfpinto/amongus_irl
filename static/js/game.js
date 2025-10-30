@@ -228,8 +228,8 @@ function renderMeetingOptions(meeting) {
         const player = alivePlayers[i];
         const btn = document.createElement("button");
         btn.type = "button";
-        btn.textContent = player.name;
         btn.dataset.target = player.id;
+        btn.title = player.name || "";
         if (player.id === myVote) {
             btn.classList.add("selected");
         }
@@ -237,6 +237,24 @@ function renderMeetingOptions(meeting) {
         btn.addEventListener("click", function () {
             sendVote(player.id);
         });
+
+        const option = document.createElement("div");
+        option.classList.add("vote-option");
+
+        if (player.avatar) {
+            const avatar = document.createElement("img");
+            avatar.src = player.avatar;
+            avatar.alt = player.name || "Jogador";
+            avatar.classList.add("vote-avatar");
+            option.appendChild(avatar);
+        }
+
+        const label = document.createElement("span");
+        label.classList.add("vote-name");
+        label.textContent = player.name;
+        option.appendChild(label);
+
+        btn.appendChild(option);
         meetingOptionsEl.appendChild(btn);
     }
 
@@ -303,11 +321,16 @@ function describeSummary(summary) {
     if (!summary) {
         return "Reuniao concluida.";
     }
-    if (summary.gameOver && summary.gameOver.winner === "crewmates") {
-        return "O impostor foi expulso. Tripulacao vence!";
-    }
-    if (summary.gameOver && summary.gameOver.winner === "impostor") {
-        return "Restam poucos jogadores. Impostor vence.";
+    if (summary.gameOver) {
+        if (summary.gameOver.message) {
+            return summary.gameOver.message;
+        }
+        if (summary.gameOver.winner === "crewmates") {
+            return "O impostor foi expulso. Tripulacao vence!";
+        }
+        if (summary.gameOver.winner === "impostor") {
+            return "Impostor venceu.";
+        }
     }
     if (summary.outcome === "ejected" && summary.ejected) {
         return summary.ejected.name + " foi expulso.";
@@ -373,10 +396,17 @@ function showGameOver(info) {
     hideMeetingSummary();
     if (info.winner === "crewmates") {
         gameOverTitleEl.textContent = "Tripulacao venceu!";
-        gameOverTextEl.textContent = "O impostor foi eliminado.";
+        gameOverTextEl.textContent = info.message || "O impostor foi eliminado.";
     } else {
-        gameOverTitleEl.textContent = "Impostor venceu!";
-        gameOverTextEl.textContent = "Restam apenas tres jogadores ou menos.";
+        const impostorName =
+            info.impostor && info.impostor.name ? info.impostor.name : "Impostor";
+        const headline = info.message || "Impostor venceu!";
+        gameOverTitleEl.textContent = headline;
+        const detail =
+            info.reason === "last_crewmate"
+                ? "Restava apenas um tripulante vivo."
+                : "O impostor " + impostorName + " manteve o controlo da nave.";
+        gameOverTextEl.textContent = detail;
     }
     gameOverOverlay.classList.remove("hidden");
 }
