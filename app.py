@@ -108,7 +108,7 @@ def _default_task_pool() -> Dict[str, List[Union[str, Dict[str, object]]]]:
                 "max_occurrences": 1,
             },
             {
-                "name": "Acender vela ao lado das fitas de crime",
+                "name": "Acender vela restante na sala",
                 "max_occurrences": 1,
             },
             {
