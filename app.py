@@ -253,7 +253,7 @@ class GameState:
         self._used_avatars: Set[str] = set()
         self.comms_sabotage_end: float = 0.0
         self.comms_sabotage_by: Optional[str] = None
-        self.comms_sabotage_duration: int = 60  # seconds
+        self.comms_sabotage_duration: int = 25  # seconds
         self._refresh_task_templates()
         self._reset_task_usage()
 
