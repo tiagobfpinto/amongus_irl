@@ -45,6 +45,8 @@ const commsOverlay = document.getElementById("comms-overlay");
 const commsCountdownEl = document.getElementById("comms-countdown");
 const medicPanel = document.getElementById("medic-panel");
 const medicVitalsEl = document.getElementById("medic-vitals");
+const medicActivateBtn = document.getElementById("medic-activate-btn");
+const medicStatusEl = document.getElementById("medic-status");
 
 const POLL_INTERVAL = 4000;
 const SKIP_VOTE = "skip";
@@ -76,6 +78,9 @@ let isMedic = false;
 let commsCountdownTimer = null;
 let currentCommsRemaining = 0;
 let commsActive = false;
+let commsInProgress = false;
+let commsGlobalRemaining = 0;
+let medicAutoRefreshTimer = null;
 
 function translateRole(role, special) {
     if (role === "impostor") {
@@ -95,7 +100,7 @@ function roleHint(role, special) {
         return "Finge fazer tarefas e evita ser apanhado.";
     }
     if (special === "medic") {
-        return "Consegue ver as vitals para verificar quem continua vivo.";
+        return "Usa o botao das vitals para ver o estado durante 5 segundos apos cada tarefa.";
     }
     if (role === "crewmate") {
         return "Completa as tuas tarefas e desconfia dos impostores.";
@@ -223,7 +228,7 @@ function updateKillUI() {
         killBtn.disabled = remaining > 0 || availableTargets === 0;
     }
     if (sabotageBtn) {
-        const canSabotage = !commsActive && canUse;
+        const canSabotage = canUse && !commsInProgress;
         sabotageBtn.disabled = !canSabotage;
     }
     if (killTimerEl) {
@@ -705,9 +710,9 @@ function updateSabotageStatus() {
         sabotageStatusEl.textContent = "";
         return;
     }
-    if (commsActive) {
+    if (commsInProgress) {
         sabotageStatusEl.textContent =
-            "Comunicacoes voltam em " + Math.max(0, currentCommsRemaining) + "s";
+            "Comunicacoes voltam em " + Math.max(0, commsGlobalRemaining) + "s";
     } else {
         sabotageStatusEl.textContent = "Comunicacoes disponiveis.";
     }
@@ -721,9 +726,14 @@ function stopCommsCountdown() {
 }
 
 function hideCommsOverlay() {
+    const wasActive = commsActive;
     stopCommsCountdown();
     commsActive = false;
     currentCommsRemaining = 0;
+    if (wasActive) {
+        commsInProgress = false;
+        commsGlobalRemaining = 0;
+    }
     if (commsOverlay) {
         commsOverlay.classList.add("hidden");
     }
@@ -742,6 +752,8 @@ function showCommsOverlay(remainingSeconds) {
     }
     commsActive = true;
     currentCommsRemaining = seconds;
+    commsInProgress = true;
+    commsGlobalRemaining = seconds;
     if (commsCountdownEl) {
         commsCountdownEl.textContent = seconds;
     }
@@ -751,9 +763,11 @@ function showCommsOverlay(remainingSeconds) {
     stopCommsCountdown();
     commsCountdownTimer = setInterval(function () {
         currentCommsRemaining = Math.max(0, currentCommsRemaining - 1);
+        commsGlobalRemaining = currentCommsRemaining;
         if (commsCountdownEl) {
             commsCountdownEl.textContent = Math.max(0, currentCommsRemaining);
         }
+        updateSabotageStatus();
         if (currentCommsRemaining <= 0) {
             hideCommsOverlay();
         }
@@ -762,53 +776,114 @@ function showCommsOverlay(remainingSeconds) {
     updateKillUI();
 }
 
-function renderMedicPanel(vitals) {
+function clearMedicAutoRefresh() {
+    if (medicAutoRefreshTimer) {
+        clearTimeout(medicAutoRefreshTimer);
+        medicAutoRefreshTimer = null;
+    }
+}
+
+function scheduleMedicAutoRefresh(seconds) {
+    clearMedicAutoRefresh();
+    const ms = Math.max(0, parseInt(seconds, 10) || 0) * 1000;
+    if (ms <= 0) {
+        return;
+    }
+    medicAutoRefreshTimer = setTimeout(function () {
+        medicAutoRefreshTimer = null;
+        fetchPlayer();
+    }, ms + 200);
+}
+
+function renderMedicPanel(medicData) {
     if (!medicPanel || !medicVitalsEl) {
         return;
     }
-    if (!isMedic || !Array.isArray(vitals) || vitals.length === 0) {
+    if (!isMedic) {
         medicPanel.classList.add("hidden");
         medicVitalsEl.innerHTML = "";
+        if (medicStatusEl) {
+            medicStatusEl.textContent = "";
+        }
+        if (medicActivateBtn) {
+            medicActivateBtn.disabled = true;
+        }
+        clearMedicAutoRefresh();
         return;
     }
+
+    const data = medicData || {};
+    const duration = Math.max(1, parseInt(data.duration, 10) || 5);
+    const active = data.active === true;
+    const ready = data.ready === true;
+    const remaining = Math.max(0, parseInt(data.remaining, 10) || 0);
+    const vitals = Array.isArray(data.vitals) ? data.vitals.slice() : [];
+
     medicPanel.classList.remove("hidden");
+
+    if (medicActivateBtn) {
+        const canUse =
+            ready && !active && currentStatus === "in_game" && isAlive;
+        medicActivateBtn.disabled = !canUse;
+        medicActivateBtn.textContent = "Ver vitals (" + duration + "s)";
+    }
+
     medicVitalsEl.innerHTML = "";
-    vitals
-        .slice()
-        .sort(function (a, b) {
-            const nameA = (a && a.name ? a.name : "").toLowerCase();
-            const nameB = (b && b.name ? b.name : "").toLowerCase();
-            return nameA.localeCompare(nameB);
-        })
-        .forEach(function (entry) {
-            if (!entry) {
-                return;
-            }
-            const li = document.createElement("li");
-            li.classList.add("vital");
-            if (entry.leftGame) {
-                li.classList.add("left");
-            } else if (entry.alive) {
-                li.classList.add("alive");
-            } else {
-                li.classList.add("dead");
-            }
-            const nameSpan = document.createElement("span");
-            nameSpan.classList.add("name");
-            nameSpan.textContent = entry.name || "Jogador";
-            li.appendChild(nameSpan);
-            const stateSpan = document.createElement("span");
-            stateSpan.classList.add("state");
-            if (entry.leftGame) {
-                stateSpan.textContent = "Saiu";
-            } else if (entry.alive) {
-                stateSpan.textContent = "Vivo";
-            } else {
-                stateSpan.textContent = "Morto";
-            }
-            li.appendChild(stateSpan);
-            medicVitalsEl.appendChild(li);
-        });
+    if (active && vitals.length > 0) {
+        vitals
+            .sort(function (a, b) {
+                const nameA = (a && a.name ? a.name : "").toLowerCase();
+                const nameB = (b && b.name ? b.name : "").toLowerCase();
+                return nameA.localeCompare(nameB);
+            })
+            .forEach(function (entry) {
+                if (!entry) {
+                    return;
+                }
+                const li = document.createElement("li");
+                li.classList.add("vital");
+                if (entry.leftGame) {
+                    li.classList.add("left");
+                } else if (entry.alive) {
+                    li.classList.add("alive");
+                } else {
+                    li.classList.add("dead");
+                }
+                const nameSpan = document.createElement("span");
+                nameSpan.classList.add("name");
+                nameSpan.textContent = entry.name || "Jogador";
+                li.appendChild(nameSpan);
+                const stateSpan = document.createElement("span");
+                stateSpan.classList.add("state");
+                if (entry.leftGame) {
+                    stateSpan.textContent = "Saiu";
+                } else if (entry.alive) {
+                    stateSpan.textContent = "Vivo";
+                } else {
+                    stateSpan.textContent = "Morto";
+                }
+                li.appendChild(stateSpan);
+                medicVitalsEl.appendChild(li);
+            });
+        if (medicStatusEl) {
+            medicStatusEl.textContent =
+                "Visiveis por " + Math.max(0, remaining) + "s";
+        }
+        scheduleMedicAutoRefresh(remaining);
+    } else {
+        clearMedicAutoRefresh();
+        const placeholder = document.createElement("li");
+        placeholder.classList.add("muted");
+        placeholder.textContent = ready
+            ? 'Clica em "Ver vitals" para mostrar durante alguns segundos.'
+            : "Completa uma nova tarefa para reativar as vitals.";
+        medicVitalsEl.appendChild(placeholder);
+        if (medicStatusEl) {
+            medicStatusEl.textContent = ready
+                ? "Disponivel para ativar."
+                : "Aguarda por concluir uma tarefa.";
+        }
+    }
 }
 
 function openReportModal() {
@@ -1049,6 +1124,9 @@ function updateTaskStatus(taskId, done) {
                 if (data.progress) {
                     applyProgress(data.progress);
                 }
+                if (data.gameOver) {
+                    showGameOver(data.gameOver);
+                }
                 return data;
             });
         });
@@ -1106,6 +1184,34 @@ function triggerKill() {
         return;
     }
     openKillModal();
+}
+
+function activateMedicVitals() {
+    if (!isMedic || !medicActivateBtn) {
+        return;
+    }
+    const inGame = currentStatus === "in_game";
+    if (!inGame || !isAlive) {
+        return;
+    }
+    medicActivateBtn.disabled = true;
+    fetch("/api/medic/vitals", { method: "POST" })
+        .then(parseJsonSafe)
+        .then(function (data) {
+            if (!data || !data.ok) {
+                const msg = data && data.error ? data.error : "Nao podes ver as vitals agora.";
+                throw new Error(msg);
+            }
+            fetchPlayer();
+        })
+        .catch(function (error) {
+            console.error(error);
+            alert(error.message);
+            fetchPlayer();
+        })
+        .finally(function () {
+            // Estado atualizado assim que fetchPlayer terminar.
+        });
 }
 
 function triggerSabotage() {
@@ -1244,7 +1350,7 @@ function fetchPlayer() {
             }
 
             renderTasks(data.tasks || {});
-            renderMedicPanel(isMedic ? data.vitals : null);
+            renderMedicPanel(isMedic ? data.medicVitals : null);
 
             killTargets = Array.isArray(data.killTargets) ? data.killTargets : [];
             if (!isImpostor) {
@@ -1269,16 +1375,22 @@ function fetchPlayer() {
             }
 
             const commsData = data.commsSabotage || {};
-            if (
-                commsData &&
-                commsData.active &&
-                typeof commsData.remaining === "number" &&
-                commsData.remaining > 0
-            ) {
-                showCommsOverlay(commsData.remaining);
+            const rawRemaining =
+                typeof commsData.remaining === "number"
+                    ? commsData.remaining
+                    : parseInt(commsData.remaining, 10);
+            const remainingSeconds = isNaN(rawRemaining) ? 0 : Math.max(0, rawRemaining);
+            const affectsPlayer = commsData.affectsPlayer === true;
+            const globalActive =
+                !!(commsData && commsData.active && remainingSeconds > 0);
+            commsInProgress = globalActive;
+            commsGlobalRemaining = globalActive ? remainingSeconds : 0;
+            if (affectsPlayer && globalActive) {
+                showCommsOverlay(remainingSeconds);
             } else {
                 hideCommsOverlay();
             }
+            updateSabotageStatus();
 
             const killValue =
                 typeof data.killRemaining === "number"
@@ -1356,6 +1468,9 @@ function setup() {
     }
     if (resetBtn) {
         resetBtn.addEventListener("click", resetGame);
+    }
+    if (medicActivateBtn) {
+        medicActivateBtn.addEventListener("click", activateMedicVitals);
     }
     if (killBtn) {
         killBtn.addEventListener("click", triggerKill);

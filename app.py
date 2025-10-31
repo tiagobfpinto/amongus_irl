@@ -5,7 +5,7 @@ import time
 import uuid
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, Union
 
 from flask import (
     Flask,
@@ -24,32 +24,97 @@ def random_drawing():
     ]
     return random.choice(drawings)
 
-def _default_task_pool() -> Dict[str, List[str]]:
-    """Provide starter tasks so the app works out of the box."""
+def random_location():
+    locations = [
+        "porta do carro do parra", "frigorifico", "cadeira na sala de estar","tronco, na parte de fora da casa"
+    ]
+    return random.choice(locations)
+
+
+
+def _default_task_pool() -> Dict[str, List[Union[str, Dict[str, object]]]]:
+    """Provide starter tasks so the app works out of the box.
+
+    Each entry can be a plain string or a mapping with ``max_occurrences`` to
+    control how many players may receive that task.
+    """
     return {
         "common": [
-            "Assinar a folha de presencças (mesa inicial)"
+            "Assinar a folha de presencas (mesa inicial)"
         ],
         "long": [
-            f"Desenha {random_drawing()} no quarto das crianças",
-            "Montar castelo de cartas (casa de banho das crianças)",
-            "Encher saco do lixo na sala e meter na rampa dos carros",
-            "Acertar nas 3 latas com uma bala de nerf (jardim)",
-            "Montar castelo de cartas (cozinha)"
+            {
+                "name": "Pegar saco do lixo na sala e meter na rampa dos carros",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Montar castelo de cartas na casa de banho de criancas",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Montar castelo de cartas na dispensa",
+                "max_occurrences": 1,
+            },
+            
         ],
         "fast": [
-            "Beber conteudo do copo (cozinha)",
-            "Recolher uma flor do jardim e colocar dentro do lavatório (cozinha)",
-            "Download data in weapons",
-            "Ligar TV do quarto principal",
-            "Coloca toalha dentro da banheira (casa de banho)",
-            "Ordena garrafas de bebida pela primeira letra da marca (cozinha)",
-            "Empilhar 5 tampas umas em cima das outras (sala)",
-            "Fazer uma bebida (a ser decidida)",
-            "Ligar TV quarto das crianças",
-            "Ordenar latas de cerveja numeradas",
-            "Cortar uma rodela de limão",
-            "Fazer uma pila com o jogo do galo"
+            {
+                "name": "Ordenar garrafas de bebida pela primeira letra da marca por ordem alfabetica",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Empilhar 5 tampas umas em cima das outras na mesa principal",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Fazer uma bebida (decidir qual depois)",
+                "max_occurrences": 2,
+            },
+            {
+                "name": "Beber conteudo dum copo",
+                "max_occurrences": 2,
+            },
+            {
+                "name": "Ligar TV da sala",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Ligar TV do quarto de criancas",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Ligar TV do quarto principal",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Meter toalha de maos no chuveiro",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Ordenar latas de cerveja numeradas",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Cortar uma rodela de limao na cozinha",
+                "max_occurrences": 2,
+            },
+            
+            {
+                "name": "Fazer uma pila com os O do jogo do galo",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Acender velas",
+                "max_occurrences": 2,
+            },
+            {
+                "name": f"Desenhar {random_drawing()} na cozinha",
+                "max_occurrences": 2,
+            },
+            {
+                "name": f"Pegar morcego na localização {random_location()} e dar um grito",
+                "max_occurrences": 4,
+            },
         ],
     }
 
@@ -76,6 +141,12 @@ class TaskItem:
         return {"id": self.task_id, "name": self.name, "done": self.done}
 
 
+@dataclass(frozen=True)
+class TaskTemplate:
+    name: str
+    max_occurrences: Optional[int] = None
+
+
 @dataclass
 class Player:
     player_id: str
@@ -94,6 +165,9 @@ class Player:
     death_reported: bool = False
     left_game: bool = False
     emergency_available: bool = True
+    medic_vitals_active_until: float = 0.0
+    medic_vitals_ready: bool = True
+    medic_completed_tasks: Set[str] = field(default_factory=set)
 
     def lobby_payload(self, current_id: str, leader_id: Optional[str]) -> Dict[str, object]:
         return {
@@ -159,7 +233,11 @@ class GameState:
             "kill_cooldown": 120,
             "meeting_duration": 150,
         }
+        self.medic_vitals_duration: int = 5
         self.task_pool = _default_task_pool()
+        self.task_templates: Dict[str, List[TaskTemplate]] = {}
+        self._task_usage: Dict[str, int] = {}
+        self._selected_common_tasks: List[TaskTemplate] = []
         self.meeting: Optional[Dict[str, object]] = None
         self.last_meeting_summary: Optional[Dict[str, object]] = None
         self.revealed_progress: float = 0.0
@@ -168,6 +246,8 @@ class GameState:
         self.comms_sabotage_end: float = 0.0
         self.comms_sabotage_by: Optional[str] = None
         self.comms_sabotage_duration: int = 60  # seconds
+        self._refresh_task_templates()
+        self._reset_task_usage()
 
     def current_player(self, player_id: str) -> Optional[Player]:
         return self.players.get(player_id)
@@ -346,21 +426,107 @@ class GameState:
                 "leaderId": self.leader_id,
             }
 
+    def _normalize_task_pool(self) -> Dict[str, List[TaskTemplate]]:
+        normalized: Dict[str, List[TaskTemplate]] = {}
+        for category, entries in self.task_pool.items():
+            normalized_entries: List[TaskTemplate] = []
+            for entry in entries:
+                if isinstance(entry, TaskTemplate):
+                    normalized_entries.append(entry)
+                    continue
+                if isinstance(entry, dict):
+                    name = str(entry.get("name", "")).strip()
+                    if not name:
+                        continue
+                    raw_limit = entry.get("max_occurrences", entry.get("max"))
+                    if raw_limit is None:
+                        normalized_entries.append(TaskTemplate(name=name, max_occurrences=None))
+                        continue
+                    try:
+                        limit = int(raw_limit)
+                    except (TypeError, ValueError):
+                        normalized_entries.append(TaskTemplate(name=name, max_occurrences=None))
+                        continue
+                    if limit <= 0:
+                        continue
+                    normalized_entries.append(TaskTemplate(name=name, max_occurrences=limit))
+                    continue
+                name = str(entry).strip()
+                if not name:
+                    continue
+                normalized_entries.append(TaskTemplate(name=name, max_occurrences=None))
+            normalized[category] = normalized_entries
+        return normalized
+
+    def _refresh_task_templates(self) -> None:
+        self.task_templates = self._normalize_task_pool()
+
+    def _reset_task_usage(self) -> None:
+        self._task_usage = {}
+
+    def _task_key(self, category: str, template: TaskTemplate) -> str:
+        return f"{category}:{template.name}"
+
+    def _increment_task_usage(self, category: str, template: TaskTemplate) -> None:
+        if template.max_occurrences is None:
+            return
+        key = self._task_key(category, template)
+        self._task_usage[key] = self._task_usage.get(key, 0) + 1
+
+    def _select_task_template(self, category: str, assigned_names: Set[str]) -> Optional[TaskTemplate]:
+        templates = self.task_templates.get(category, [])
+        if not templates:
+            return None
+        eligible: List[TaskTemplate] = []
+        preferred: List[TaskTemplate] = []
+        for template in templates:
+            if template.max_occurrences is not None:
+                usage = self._task_usage.get(self._task_key(category, template), 0)
+                if usage >= template.max_occurrences:
+                    continue
+            eligible.append(template)
+            if template.name not in assigned_names:
+                preferred.append(template)
+        if not eligible:
+            return None
+        pool = preferred or eligible
+        return random.choice(pool)
+
+    def _choose_common_tasks(self, player_count: int) -> List[TaskTemplate]:
+        count = int(self.config.get("task_counts", {}).get("common", 0))
+        templates = self.task_templates.get("common", [])
+        if count <= 0 or not templates or player_count <= 0:
+            return []
+        if count >= len(templates):
+            return [random.choice(templates) for _ in range(count)]
+        return random.sample(templates, count)
+
     def _build_tasks(self) -> Dict[str, List[TaskItem]]:
         tasks: Dict[str, List[TaskItem]] = {}
-        for category, count in self.config["task_counts"].items():
-            pool = self.task_pool.get(category, [])
-            if not pool:
+        task_counts = self.config.get("task_counts", {})
+        for category, count in task_counts.items():
+            if count <= 0:
                 tasks[category] = []
                 continue
-            if count <= len(pool):
-                selected = random.sample(pool, count)
-            else:
-                selected = pool.copy()
-                remaining = count - len(pool)
-                selected.extend(random.choices(pool, k=remaining))
+            if category == "common":
+                selected_templates = self._selected_common_tasks[:count]
+                tasks[category] = [
+                    TaskItem(task_id=f"{category}:{uuid.uuid4().hex}", name=template.name)
+                    for template in selected_templates
+                ]
+                continue
+            assigned_templates: List[TaskTemplate] = []
+            assigned_names: Set[str] = set()
+            for _ in range(count):
+                template = self._select_task_template(category, assigned_names)
+                if not template:
+                    break
+                assigned_templates.append(template)
+                assigned_names.add(template.name)
+                self._increment_task_usage(category, template)
             tasks[category] = [
-                TaskItem(task_id=f"{category}:{uuid.uuid4().hex}", name=name) for name in selected
+                TaskItem(task_id=f"{category}:{uuid.uuid4().hex}", name=template.name)
+                for template in assigned_templates
             ]
         return tasks
 
@@ -389,11 +555,15 @@ class GameState:
             all_ids = [player.player_id for player in active_players]
             impostor_ids = set(random.sample(all_ids, self.config["impostors"]))
 
+            self._refresh_task_templates()
+            self._reset_task_usage()
+            self._selected_common_tasks = self._choose_common_tasks(len(active_players))
+
             for pid, player in self.players.items():
                 if player.left_game:
                     continue
                 player.role = "impostor" if pid in impostor_ids else "crewmate"
-                player.tasks = self._build_tasks()
+                player.tasks = {}
                 player.alive = True
                 if player.role == "impostor":
                     player.kill_cooldown_end = time.time()
@@ -406,11 +576,22 @@ class GameState:
                 player.left_game = False
                 player.special_role = None
                 player.emergency_available = True
+                player.medic_vitals_active_until = 0.0
+                player.medic_vitals_ready = False
+                player.medic_completed_tasks = set()
+
+            assignment_players = active_players[:]
+            random.shuffle(assignment_players)
+            for player in assignment_players:
+                player.tasks = self._build_tasks()
 
             medic_candidates = [p for p in self.players.values() if p.role == "crewmate" and not p.left_game]
             if medic_candidates:
                 medic = random.choice(medic_candidates)
                 medic.special_role = "medic"
+                medic.medic_vitals_active_until = 0.0
+                medic.medic_vitals_ready = True
+                medic.medic_completed_tasks = set()
 
             return {"ok": True}
 
@@ -422,6 +603,8 @@ class GameState:
             self.last_meeting_summary = None
             self.revealed_progress = 0.0
             self.end_info = None
+            self._reset_task_usage()
+            self._selected_common_tasks = []
             for pid, player in list(self.players.items()):
                 if player.left_game:
                     self._release_avatar_locked(player.avatar)
@@ -439,6 +622,9 @@ class GameState:
                 player.left_game = False
                 player.special_role = None
                 player.emergency_available = True
+                player.medic_vitals_active_until = 0.0
+                player.medic_vitals_ready = True
+                player.medic_completed_tasks = set()
             self._clear_comms_sabotage_locked()
 
     def impostor_sabotage(self, player_id: str) -> Dict[str, object]:
@@ -466,6 +652,54 @@ class GameState:
             self.comms_sabotage_end = now + self.comms_sabotage_duration
             self.comms_sabotage_by = player_id
             return {"ok": True, "duration": self.comms_sabotage_duration}
+
+    def medic_activate_vitals(self, player_id: str) -> Dict[str, object]:
+        with self._lock:
+            player = self.players.get(player_id)
+            if not player:
+                return {"ok": False, "error": "Jogador nao encontrado."}
+            if self.status != "in_game":
+                return {"ok": False, "error": "As vitals so estao disponiveis durante a ronda."}
+            if player.special_role != "medic":
+                return {"ok": False, "error": "Apenas o medico pode usar este botao."}
+            if player.left_game:
+                return {"ok": False, "error": "Jogador nao esta ativo."}
+
+            self._clear_expired_medic_window_locked(player)
+            now = time.time()
+            remaining = max(0, int(player.medic_vitals_active_until - now))
+            if player.medic_vitals_active_until > now:
+                vitals = self._collect_vitals_locked()
+                return {
+                    "ok": True,
+                    "active": True,
+                    "remaining": remaining,
+                    "ready": player.medic_vitals_ready,
+                    "duration": self.medic_vitals_duration,
+                    "vitals": vitals,
+                }
+
+            if not player.medic_vitals_ready:
+                return {
+                    "ok": False,
+                    "error": "Completa uma nova tarefa para desbloquear novamente as vitals.",
+                    "active": False,
+                    "remaining": 0,
+                    "ready": False,
+                    "duration": self.medic_vitals_duration,
+                }
+
+            player.medic_vitals_ready = False
+            player.medic_vitals_active_until = now + self.medic_vitals_duration
+            vitals = self._collect_vitals_locked()
+            return {
+                "ok": True,
+                "active": True,
+                "remaining": self.medic_vitals_duration,
+                "ready": player.medic_vitals_ready,
+                "duration": self.medic_vitals_duration,
+                "vitals": vitals,
+            }
 
     def impostor_kill(self, player_id: str, target_id: str) -> Dict[str, object]:
         with self._lock:
@@ -526,6 +760,8 @@ class GameState:
         total = 0
         completed = 0
         for player in self.players.values():
+            if player.left_game or player.role != "crewmate":
+                continue
             for items in player.tasks.values():
                 for task in items:
                     total += 1
@@ -552,19 +788,48 @@ class GameState:
                 if target_task:
                     break
 
-            if not target_task:
-                return {"ok": False, "error": "Tarefa nao encontrada."}
+        if not target_task:
+            return {"ok": False, "error": "Tarefa nao encontrada."}
 
-            target_task.done = bool(done)
-            total, completed = self._task_totals_unlocked()
-            current_progress = completed / total if total else 0.0
-            progress_payload = {
-                "total": total,
-                "completed": completed,
-                "current": current_progress,
-                "revealed": self.revealed_progress,
+        previous_done = target_task.done
+        target_task.done = bool(done)
+        if player.special_role == "medic":
+            self._handle_medic_task_update_locked(player, target_task, previous_done)
+        total, completed = self._task_totals_unlocked()
+        current_progress = completed / total if total else 0.0
+        if total and completed >= total and self.status in {"in_game", "meeting"}:
+            self.status = "ended"
+            self.end_info = {
+                "winner": "crewmates",
+                "reason": "tasks",
+                "message": "Todas as tarefas foram concluidas. Tripulacao venceu!",
             }
-            return {"ok": True, "task": target_task.to_payload(), "progress": progress_payload}
+            self.revealed_progress = max(self.revealed_progress, current_progress)
+            self.meeting = None
+            self._clear_comms_sabotage_locked()
+        progress_payload = {
+            "total": total,
+            "completed": completed,
+            "current": current_progress,
+            "revealed": self.revealed_progress,
+        }
+        result: Dict[str, object] = {
+            "ok": True,
+            "task": target_task.to_payload(),
+            "progress": progress_payload,
+        }
+        if self.status == "ended" and self.end_info:
+            result["gameOver"] = self.end_info
+        return result
+
+    def _handle_medic_task_update_locked(
+        self, player: Player, task: TaskItem, previous_done: bool
+    ) -> None:
+        if player.special_role != "medic":
+            return
+        if task.done and not previous_done and task.task_id not in player.medic_completed_tasks:
+            player.medic_completed_tasks.add(task.task_id)
+            player.medic_vitals_ready = True
 
     def _alive_players_unlocked(self) -> List[Player]:
         return [player for player in self.players.values() if player.alive and not player.left_game]
@@ -588,6 +853,23 @@ class GameState:
         self._clear_expired_comms_locked()
         return max(0, int(self.comms_sabotage_end - time.time()))
 
+    def _clear_expired_medic_window_locked(self, player: Player) -> None:
+        if player.medic_vitals_active_until and time.time() >= player.medic_vitals_active_until:
+            player.medic_vitals_active_until = 0.0
+
+    def _collect_vitals_locked(self) -> List[Dict[str, object]]:
+        vitals: List[Dict[str, object]] = []
+        for other in self.players.values():
+            vitals.append(
+                {
+                    "id": other.player_id,
+                    "name": other.name,
+                    "alive": other.alive and not other.left_game,
+                    "leftGame": other.left_game,
+                }
+            )
+        return vitals
+
     def _mark_player_dead_locked(self, victim: Player, killer: Optional[Player]) -> None:
         if not victim.alive:
             return
@@ -609,6 +891,9 @@ class GameState:
         player.ready = False
         player.special_role = None
         player.emergency_available = False
+        player.medic_vitals_active_until = 0.0
+        player.medic_vitals_ready = False
+        player.medic_completed_tasks = set()
 
         if player.alive and player.role == "impostor":
             player.alive = False
@@ -1042,25 +1327,29 @@ class GameState:
                 "emergencyAvailable": player.emergency_available,
             }
             comms_remaining = self._comms_remaining_locked()
+            comms_active = comms_remaining > 0
             payload["commsSabotage"] = {
-                "active": comms_remaining > 0,
+                "active": comms_active,
                 "remaining": comms_remaining,
+                "affectsPlayer": comms_active and player.role != "impostor",
             }
             if kill_targets:
                 payload["killTargets"] = kill_targets
 
             if player.special_role == "medic":
-                vitals = []
-                for other in self.players.values():
-                    vitals.append(
-                        {
-                            "id": other.player_id,
-                            "name": other.name,
-                            "alive": other.alive and not other.left_game,
-                            "leftGame": other.left_game,
-                        }
-                    )
-                payload["vitals"] = vitals
+                self._clear_expired_medic_window_locked(player)
+                now = time.time()
+                remaining = max(0, int(player.medic_vitals_active_until - now))
+                active = player.medic_vitals_active_until > now
+                medic_payload: Dict[str, object] = {
+                    "active": active,
+                    "remaining": remaining,
+                    "ready": player.medic_vitals_ready,
+                    "duration": self.medic_vitals_duration,
+                }
+                if active:
+                    medic_payload["vitals"] = self._collect_vitals_locked()
+                payload["medicVitals"] = medic_payload
 
             if meeting_payload:
                 payload["meeting"] = meeting_payload
@@ -1318,6 +1607,16 @@ def api_tasks_complete():
     task_id = data.get("taskId", "")
     done = bool(data.get("done", True))
     result = lobby_obj.mark_task(player.player_id, task_id, done)
+    status_code = 200 if result.get("ok") else 400
+    return jsonify(result), status_code
+
+
+@app.route("/api/medic/vitals", methods=["POST"])
+def api_medic_vitals():
+    lobby_obj, player = _current_context()
+    if not lobby_obj or not player:
+        return jsonify({"ok": False, "error": "Sessao expirada. Volta ao lobby."}), 404
+    result = lobby_obj.medic_activate_vitals(player.player_id)
     status_code = 200 if result.get("ok") else 400
     return jsonify(result), status_code
 
