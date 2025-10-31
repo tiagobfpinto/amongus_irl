@@ -115,6 +115,14 @@ def _default_task_pool() -> Dict[str, List[Union[str, Dict[str, object]]]]:
                 "name": f"Pegar morcego na localização {random_location()} e dar um grito",
                 "max_occurrences": 4,
             },
+            {
+                "name": "Pegar a pizza de brincar no quarto de crianças e levar para o frigorifico verdadeiro",
+                "max_occurrences": 1,
+            },
+            {
+                "name": "Meter as bolas da mesa de snooker dentro do triangulo (quarto crianças)",
+                "max_occurrences": 1,
+            },
         ],
     }
 
