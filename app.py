@@ -59,7 +59,7 @@ def _default_task_pool() -> Dict[str, List[Union[str, Dict[str, object]]]]:
         ],
         "fast": [
             {
-                "name": "Ordenar garrafas de bebida pela primeira letra da marca por ordem alfabetica",
+                "name": "Ordenar garrafas de bebida pela primeira letra da marca por ordem alfabetica (cozinha)",
                 "max_occurrences": 1,
             },
             {
@@ -67,11 +67,11 @@ def _default_task_pool() -> Dict[str, List[Union[str, Dict[str, object]]]]:
                 "max_occurrences": 1,
             },
             {
-                "name": "Fazer uma bebida (decidir qual depois)",
+                "name": "Fazer uma bebida qualquer na cozinha",
                 "max_occurrences": 2,
             },
             {
-                "name": "Beber conteudo dum copo",
+                "name": "Beber conteudo dum copo na sala",
                 "max_occurrences": 2,
             },
             {
@@ -87,7 +87,7 @@ def _default_task_pool() -> Dict[str, List[Union[str, Dict[str, object]]]]:
                 "max_occurrences": 1,
             },
             {
-                "name": "Meter toalha de maos no chuveiro",
+                "name": "Meter toalha de maos no chuveiro da casa de banho das criancas",
                 "max_occurrences": 1,
             },
             {
