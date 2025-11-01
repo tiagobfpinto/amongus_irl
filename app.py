@@ -240,7 +240,7 @@ class GameState:
         self.leader_id: Optional[str] = None
         self.config = {
             "required_players": 2,
-            "impostors": 1,
+            "impostors": 2,
             "task_counts": {"common": 1, "long": 1, "fast": 3},
             "kill_cooldown": 120,
             "meeting_duration": 150,
@@ -713,6 +713,11 @@ class GameState:
                 "vitals": vitals,
             }
 
+    def _apply_impostor_cooldown_locked(self, cooldown_end: float) -> None:
+        for other in self.players.values():
+            if other.role == "impostor" and not other.left_game:
+                other.kill_cooldown_end = cooldown_end
+
     def impostor_kill(self, player_id: str, target_id: str) -> Dict[str, object]:
         with self._lock:
             player = self.players.get(player_id)
@@ -742,7 +747,8 @@ class GameState:
                     "remaining": remaining,
                 }
 
-            player.kill_cooldown_end = now + self.config["kill_cooldown"]
+            cooldown_end = now + self.config["kill_cooldown"]
+            self._apply_impostor_cooldown_locked(cooldown_end)
             self._mark_player_dead_locked(target_player, player)
 
             impostor_survivor = self._impostor_last_crewmate_locked()
